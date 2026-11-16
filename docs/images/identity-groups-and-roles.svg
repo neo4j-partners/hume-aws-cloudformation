@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="20 20 920 470" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title>Cognito Groups Mapped to Hume Roles and Neo4j Roles</title>
+<defs><filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1a1a1a" flood-opacity="0.10"/></filter><marker id="arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="#8A8A8A"/></marker></defs>
+<rect x="34" y="32" width="892" height="456" rx="16" fill="#FFFFFF" stroke="#E7E4DB" filter="url(#sh)"/>
+<text x="44" y="58" fill="#5C6470" font-size="8.5" font-weight="700" text-anchor="start" letter-spacing="0.4">ONE COGNITO GROUPS CLAIM, TWO SEPARATE MAPPINGS: HUME READS ONE, NEO4J READS THE OTHER</text>
+<line x1="44" y1="64" x2="916" y2="64" stroke="#E7E4DB"/>
+<rect x="44" y="72" width="230" height="334" rx="12" fill="#FAFAF8" stroke="#DAD7CE"/>
+<text x="58" y="92" fill="#16233A" font-size="10" font-weight="700" text-anchor="start" letter-spacing="0.3">HUME ROLES</text>
+<text x="58" y="106" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">OidcRolesMappings on the Hume stack</text>
+<rect x="318" y="72" width="324" height="334" rx="12" fill="#FAFAF8" stroke="#DAD7CE"/>
+<text x="332" y="92" fill="#16233A" font-size="10" font-weight="700" text-anchor="start" letter-spacing="0.3">COGNITO GROUPS AND THEIR MEMBERS</text>
+<text x="332" y="106" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">cognito:groups in every token from the test pool</text>
+<rect x="686" y="72" width="230" height="334" rx="12" fill="#FAFAF8" stroke="#DAD7CE"/>
+<text x="700" y="92" fill="#16233A" font-size="10" font-weight="700" text-anchor="start" letter-spacing="0.3">NEO4J ROLES</text>
+<text x="700" y="106" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">group_to_role_mapping in neo4j.conf, EE stack</text>
+<rect x="334" y="120" width="292" height="46" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="346" y="139" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">hume-admins</text>
+<text x="346" y="155" font-size="8.5" text-anchor="start" xml:space="preserve"><tspan fill="#5C6470" font-weight="400">hume-admin</tspan></text>
+<rect x="334" y="176" width="292" height="46" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="346" y="195" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">hume-users</text>
+<text x="346" y="211" font-size="8.5" text-anchor="start" xml:space="preserve"><tspan fill="#5C6470" font-weight="400">hume-user, spine-analyst, spine-officer</tspan></text>
+<rect x="334" y="232" width="292" height="46" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="346" y="251" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">neo4j-admins</text>
+<text x="346" y="267" font-size="8.5" text-anchor="start" xml:space="preserve"><tspan fill="#5C6470" font-weight="400">neo4j-admin</tspan></text>
+<rect x="334" y="288" width="292" height="46" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="346" y="307" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">spine-analysts</text>
+<text x="346" y="323" font-size="8.5" text-anchor="start" xml:space="preserve"><tspan fill="#5C6470" font-weight="400">spine-analyst</tspan></text>
+<rect x="334" y="344" width="292" height="46" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="346" y="363" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">spine-officers</text>
+<text x="346" y="379" font-size="8.5" text-anchor="start" xml:space="preserve"><tspan fill="#5C6470" font-weight="400">hume-admin, spine-officer</tspan></text>
+<rect x="60" y="120" width="198" height="46" rx="8" fill="#CFEDE8" stroke="#156459"/>
+<text x="72" y="139" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">ADMINISTRATOR</text>
+<text x="72" y="154" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">admin pages, every knowledge graph</text>
+<line x1="332" y1="143.0" x2="262" y2="143.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="60" y="176" width="198" height="46" rx="8" fill="#CFEDE8" stroke="#156459"/>
+<text x="72" y="195" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">USER</text>
+<text x="72" y="210" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">signs in to Hume</text>
+<line x1="332" y1="199.0" x2="262" y2="199.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="60" y="288" width="198" height="46" rx="8" fill="#CFEDE8" stroke="#156459"/>
+<text x="72" y="307" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">SPINE_ANALYST</text>
+<text x="72" y="322" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">the SPINE graph, from its config</text>
+<line x1="332" y1="311.0" x2="262" y2="311.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="60" y="344" width="198" height="46" rx="8" fill="#CFEDE8" stroke="#156459"/>
+<text x="72" y="363" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">SPINE_OFFICER</text>
+<text x="72" y="378" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">the SPINE graph, from its config</text>
+<line x1="332" y1="367.0" x2="262" y2="367.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="702" y="120" width="198" height="46" rx="8" fill="#DEEAF6" stroke="#1F4E86" stroke-dasharray="4 3"/>
+<text x="714" y="139" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">reader</text>
+<text x="714" y="154" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">reads every database, OidcReaderGroup blank</text>
+<rect x="702" y="232" width="198" height="46" rx="8" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="714" y="251" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">admin</text>
+<text x="714" y="266" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">every database, users, roles, DBMS</text>
+<line x1="628" y1="255.0" x2="698" y2="255.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="702" y="288" width="198" height="46" rx="8" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="714" y="307" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">spine_analyst</text>
+<text x="714" y="322" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">reads spine, except Person birthDate</text>
+<line x1="628" y1="311.0" x2="698" y2="311.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="702" y="344" width="198" height="46" rx="8" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="714" y="363" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">spine_officer</text>
+<text x="714" y="378" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">reads all of spine</text>
+<line x1="628" y1="367.0" x2="698" y2="367.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="44" y="422" width="9" height="9" rx="2" fill="#CFEDE8" stroke="#156459"/>
+<text x="58" y="430" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">Hume role</text>
+<rect x="124" y="422" width="9" height="9" rx="2" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="138" y="430" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">Cognito group</text>
+<rect x="220" y="422" width="9" height="9" rx="2" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="234" y="430" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">Neo4j role</text>
+<rect x="304" y="422" width="9" height="9" rx="2" fill="#FFFFFF" stroke="#8A8A8A" stroke-dasharray="4 3"/>
+<text x="318" y="430" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">exists, nothing maps to it</text>
+<line x1="470" y1="426.5" x2="492" y2="426.5" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="498" y="430" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">mapping in place</text>
+<text x="44" y="452" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">Hume adds USER to every user it accepts, and it rejects a token whose groups map to no Hume role. neo4j-admin is therefore refused by Hume.</text>
+<text x="44" y="466" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">Neo4j gives PUBLIC to every user. On this cluster PUBLIC cannot access spine, so a user with no mapped group is refused there.</text>
+</svg>

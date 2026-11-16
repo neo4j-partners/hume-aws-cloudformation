@@ -1,0 +1,4352 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Hume on ECS with EC2 capacity, in the VPC of a Neo4j Enterprise Edition
+  stack. Creates the ECS cluster, one container instance, generated secrets,
+  an RDS PostgreSQL instance, the Hume services, an HTTPS load balancer with a
+  WAF, and log groups. Nothing is downloaded on deployment. The AMI carries
+  every Hume container image, so no registry or package repository is
+  contacted. The boot script in the launch template calls only the EC2
+  instance metadata service at the link-local address 169.254.169.254 and AWS
+  APIs in the stack's own Region: AWS CloudFormation (DescribeStackResource,
+  SignalResource), Amazon ECS (PutAccountSetting) and AWS Secrets Manager
+  (GetSecretValue). The stack's own calls send no customer data outside the
+  buyer's account. The Hume API validates the licence key with GraphAware over
+  HTTPS. The ExternalConnectivityDisclosure metadata lists every connection.
+
+Metadata:
+  ExternalConnectivityDisclosure:
+    Description: >-
+      Every connection this product makes. The product downloads nothing on
+      deployment. All AWS API calls use the stack's own IAM roles and stay in
+      the buyer's account and Region. The stack's own calls send no customer
+      data outside the buyer's account. RuntimeConnections lists the Hume
+      licence check with GraphAware over HTTPS.
+    DeployTimeExternalDependencies: []
+    AWSServiceEndpoints:
+      - Endpoint: http://169.254.169.254
+        Note: Link-local address on the instance. It is not an external endpoint.
+        Caller: Boot script in InstanceLaunchTemplate UserData, through curl
+        Purpose: >-
+          Reads an IMDSv2 session token and the instance id. The instance id
+          is the unique id of the boot signal.
+        DataSent: None
+      - Endpoint: Regional AWS CloudFormation API
+        Caller: Boot script in InstanceLaunchTemplate UserData, through the AWS CLI
+        Actions:
+          - cloudformation:DescribeStackResource
+          - cloudformation:SignalResource
+        Purpose: Reads the InstanceBootComplete resource and signals it.
+        Route: The VPC's interface endpoint, created or reused by the Neo4j EE stack
+        DataSent: The boot status and the instance id
+      - Endpoint: Regional Amazon ECS API
+        Caller: Boot script in InstanceLaunchTemplate UserData, through the AWS CLI
+        Actions:
+          - ecs:PutAccountSetting
+        Purpose: Turns on ENI trunking for the instance role only.
+        Route: The VPC's NAT gateways
+        DataSent: The setting name and value
+      - Endpoint: Regional AWS Secrets Manager API
+        Caller: Boot script in InstanceLaunchTemplate UserData, through the AWS CLI
+        Actions:
+          - secretsmanager:GetSecretValue
+        Purpose: Reads the truststore secret in Neo4jTruststoreSecretArn.
+        Route: The VPC's interface endpoint, created or reused by the Neo4j EE stack
+        DataSent: None
+      - Endpoint: Regional AWS Systems Manager API
+        Caller: Neo4jEeLookupFunction, during create and update
+        Actions:
+          - ssm:GetParameters
+        Purpose: Reads the Neo4j EE stack's values under /neo4j-ee/<EeStackName>/.
+        DataSent: None
+      - Endpoint: Regional Amazon ECS API
+        Caller: RunTaskFunction, during create and update
+        Actions:
+          - ecs:RunTask
+          - ecs:DescribeTasks
+          - ecs:StopTask
+        Purpose: Runs the one-time database setup task.
+        DataSent: None
+      - Endpoint: Regional Amazon RDS and AWS Secrets Manager APIs
+        Caller: DbMasterResetFunction, only on a restore from a snapshot
+        Actions:
+          - rds:DescribeDBInstances
+          - rds:ModifyDBInstance
+          - secretsmanager:GetSecretValue
+        Purpose: Sets the database master password from the stack's secret.
+        DataSent: The new master password, to Amazon RDS only
+      - Endpoint: Pre-signed Amazon S3 address from AWS CloudFormation
+        Caller: Each of the three Lambda functions
+        Purpose: Returns the custom resource result to CloudFormation.
+        DataSent: The custom resource status and its output values
+      - Endpoint: >-
+          Regional Amazon ECS, Amazon EC2, AWS Secrets Manager, AWS KMS, Amazon
+          CloudWatch Logs and AWS Systems Manager APIs
+        Caller: The Amazon ECS agent and the AWS Systems Manager agent on the instance
+        Purpose: >-
+          Register the instance, run the tasks, read the task secrets, send
+          the container logs and provide Session Manager.
+        DataSent: Container logs, to CloudWatch Logs in the buyer's account
+    RuntimeConnections:
+      - Endpoint: Neo4j EE cluster in the same VPC, neo4j+s on port 7687
+        Caller: Hume services
+        Purpose: Reads and writes the knowledge graph.
+      - Endpoint: Amazon RDS database and Amazon EFS file system in the same VPC
+        Caller: Hume services
+        Purpose: Stores Hume settings and files.
+      - Endpoint: GraphAware licence service, over HTTPS
+        Caller: Hume API
+        Purpose: Validates the Hume licence key.
+      - Endpoint: The OpenID Connect provider set in OidcIssuerUri, over HTTPS
+        Caller: Hume API and media services
+        Purpose: Fetches the provider's signing keys.
+      - Endpoint: tile.openstreetmap.org
+        Caller: The user's browser, not the stack
+        Purpose: Loads map tiles for map widgets. An administrator can set a different tile server.
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Image and capacity
+        Parameters:
+          - HumeAmiId
+          - InstanceType
+          - RootVolumeSize
+      - Label:
+          default: Access
+        Parameters:
+          - AllowedCidr1
+          - AllowedCidr2
+          - AllowedCidr3
+          - AllowedCidr4
+          - AllowedCidr5
+      - Label:
+          default: Licence
+        Parameters:
+          - HumeLicenceSecretArn
+      - Label:
+          default: Database and logs
+        Parameters:
+          - DbInstanceClass
+          - DbEngineVersion
+          - DbBackupRetentionDays
+          - LogRetentionDays
+          - AccessLogExpirationDays
+      - Label:
+          default: Restore from an earlier stack
+        Parameters:
+          - DbSnapshotIdentifier
+          - ExistingFileSystemId
+          - ExistingDataKeyArn
+      - Label:
+          default: Alarms
+        Parameters:
+          - AlarmEmail
+      - Label:
+          default: Copies of each service
+        Parameters:
+          - EventstoreCopies
+          - ApiCopies
+          - MediaCopies
+          - WebCopies
+      - Label:
+          default: Hume version and domain
+        Parameters:
+          - HumeVersion
+          - BaseDomainName
+          - HostedZoneId
+      - Label:
+          default: Sign-in
+        Parameters:
+          - AuthProvider
+          - OidcIssuerUri
+          - OidcClientId
+          - OidcRolesMappings
+          - OidcRolesClaimPath
+          - OidcPrincipalClaim
+          - OidcJwkSetUri
+          - OidcScope
+      - Label:
+          default: Neo4j connection
+        Parameters:
+          - EeStackName
+          - Neo4jTruststoreSecretArn
+      - Label:
+          default: Demo
+        Parameters:
+          - SpineConfigSecretArn
+
+Parameters:
+  HumeAmiId:
+    Type: AWS::EC2::Image::Id
+    Description: Private Hume AMI for this release. It holds the container images, so no registry is contacted at runtime.
+
+  InstanceType:
+    Type: String
+    Default: m6i.xlarge
+    AllowedValues:
+      - m6i.large
+      - m6i.xlarge
+    Description: Must support ENI trunking. m6i.xlarge runs 20 awsvpc tasks, m6i.large runs 10.
+
+  RootVolumeSize:
+    Type: Number
+    Default: 40
+    MinValue: 40
+    MaxValue: 200
+    Description: Root volume size in GiB. It must hold the images baked into the AMI, with headroom.
+
+  AllowedCidr1:
+    Type: String
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/(\d|[12]\d|3[0-2])$'
+    ConstraintDescription: Must be an IPv4 range in CIDR form, such as 203.0.113.10/32 or 198.51.100.0/24.
+    Description: First range allowed to reach the load balancer. It is required, so the UI is never open to the internet by accident. Use 0.0.0.0/0 to open it to the internet, which needs AuthProvider Oidc. Find your address at https://checkip.amazonaws.com.
+
+  AllowedCidr2:
+    Type: String
+    Default: ''
+    AllowedPattern: '^((\d{1,3}\.){3}\d{1,3}/(\d|[12]\d|3[0-2]))?$'
+    ConstraintDescription: Must be empty or an IPv4 range in CIDR form, such as 203.0.113.10/32 or 198.51.100.0/24.
+    Description: Optional extra range, slot 2 of 5. Leave it empty to use no slot. stack/allowlist.py fills and clears the slots.
+
+  AllowedCidr3:
+    Type: String
+    Default: ''
+    AllowedPattern: '^((\d{1,3}\.){3}\d{1,3}/(\d|[12]\d|3[0-2]))?$'
+    ConstraintDescription: Must be empty or an IPv4 range in CIDR form, such as 203.0.113.10/32 or 198.51.100.0/24.
+    Description: Optional extra range, slot 3 of 5. Leave it empty to use no slot. stack/allowlist.py fills and clears the slots.
+
+  AllowedCidr4:
+    Type: String
+    Default: ''
+    AllowedPattern: '^((\d{1,3}\.){3}\d{1,3}/(\d|[12]\d|3[0-2]))?$'
+    ConstraintDescription: Must be empty or an IPv4 range in CIDR form, such as 203.0.113.10/32 or 198.51.100.0/24.
+    Description: Optional extra range, slot 4 of 5. Leave it empty to use no slot. stack/allowlist.py fills and clears the slots.
+
+  AllowedCidr5:
+    Type: String
+    Default: ''
+    AllowedPattern: '^((\d{1,3}\.){3}\d{1,3}/(\d|[12]\d|3[0-2]))?$'
+    ConstraintDescription: Must be empty or an IPv4 range in CIDR form, such as 203.0.113.10/32 or 198.51.100.0/24.
+    Description: Optional extra range, slot 5 of 5. Leave it empty to use no slot. stack/allowlist.py fills and clears the slots.
+
+  HumeLicenceSecretArn:
+    Type: String
+    AllowedPattern: '^arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:\d{12}:secret:[A-Za-z0-9/_+=.@-]+-[A-Za-z0-9]{6}$'
+    ConstraintDescription: >-
+      Must be a full Secrets Manager secret ARN, including the six-character
+      suffix.
+    Description: ARN of the secret that holds the Hume licence key. The user creates it once outside the stack, so the key never passes through CloudFormation. The Hume service tasks read it.
+
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.medium
+    Description: RDS instance class for the four Hume databases.
+
+  DbEngineVersion:
+    Type: String
+    Default: '17'
+    Description: RDS PostgreSQL engine version. The parameter group family is postgres17, so keep this on major version 17.
+
+  LogRetentionDays:
+    Type: Number
+    Default: 7
+    AllowedValues: [1, 3, 5, 7, 14, 30]
+    Description: Retention for every log group in the stack.
+
+  DbBackupRetentionDays:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 35
+    Description: Days that RDS keeps automated backups. The database also keeps a final snapshot when the stack deletes it.
+
+  DbSnapshotIdentifier:
+    Type: String
+    Default: ''
+    AllowedPattern: '^[A-Za-z0-9:-]*$'
+    ConstraintDescription: Must be empty, a snapshot name, or a snapshot ARN.
+    Description: >-
+      Optional. Name or ARN of a database snapshot from an earlier Hume stack.
+      When it is set, the stack restores the database from the snapshot
+      instead of creating an empty one. Set it on create only, then pass the
+      same value on every update. A changed or cleared value replaces the
+      database. Keep the snapshot until the restored stack is proven.
+
+  ExistingFileSystemId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(fs-[0-9a-f]{8,40})?$'
+    ConstraintDescription: Must be empty or an EFS file system ID, such as fs-0123456789abcdef0.
+    Description: >-
+      Optional. EFS file system kept from an earlier Hume stack. When it is
+      set, the stack uses it for the Hume data instead of creating a new one.
+      Delete the earlier stack first, because the file system must have no
+      mount targets left. Set it on create only, then pass the same value on
+      every update.
+
+  ExistingDataKeyArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(arn:aws[a-z-]*:kms:[a-z0-9-]+:\d{12}:key/[A-Za-z0-9-]+)?$'
+    ConstraintDescription: Must be empty or a full KMS key ARN.
+    Description: >-
+      Optional. ARN of the KMS key kept from an earlier Hume stack. The
+      stack uses it instead of creating a new key. It is required when
+      DbSnapshotIdentifier or ExistingFileSystemId is set, because a restored
+      database and a kept file system stay encrypted with their original key.
+      Set it on create only, then pass the same value on every update.
+
+  AccessLogExpirationDays:
+    Type: Number
+    Default: 90
+    MinValue: 1
+    MaxValue: 3650
+    Description: Days after which the S3 lifecycle rule deletes load balancer access logs.
+
+  AlarmEmail:
+    Type: String
+    Default: ''
+    AllowedPattern: '^([^@\s]+@[^@\s]+\.[^@\s]+)?$'
+    ConstraintDescription: Must be empty or an email address.
+    Description: >-
+      Optional address for alarm notifications. The topic is created either
+      way. When this is set, SNS sends a confirmation mail, and the address
+      receives alarms only after its owner confirms.
+
+  EventstoreCopies:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 4
+    Description: Number of eventstore tasks. The one container instance must have room for every copy.
+
+  ApiCopies:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 4
+    Description: Number of api tasks. The one container instance must have room for every copy.
+
+  MediaCopies:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 4
+    Description: Number of media tasks. The one container instance must have room for every copy.
+
+  WebCopies:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 4
+    Description: Number of web tasks. The one container instance must have room for every copy.
+
+  HumeVersion:
+    Type: String
+    Default: 3.2.1
+    AllowedValues:
+      - 3.2.1
+    Description: Tag of the Hume images baked into the AMI. It must match the AMI exactly, because prefer-cached pulls remotely on any mismatch. It is also the value of the hume.version instance attribute that services are placed on.
+
+  BaseDomainName:
+    Type: String
+    MaxLength: 59
+    AllowedPattern: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+    ConstraintDescription: Use a lower case name with at least two labels and at most 59 characters, such as example.com.
+    Description: Base name of the Hume hosts. The stack serves hume.<base>, hume-api.<base> and hume-media.<base>, and it creates one certificate for the three names and one alias record for each. The base may equal the hosted zone name or sit below it, and the stack never writes a record at the base itself. Route 53 rejects any record outside the zone. ACM limits the first certificate name to 64 characters, so the base is at most 59.
+
+  HostedZoneId:
+    Type: String
+    AllowedPattern: '^Z[A-Z0-9]{8,31}$'
+    ConstraintDescription: Use the bare zone ID, such as Z0123456789ABC. Do not include the /hostedzone/ prefix.
+    Description: ID of the existing public Route 53 hosted zone that contains the three Hume hosts. The zone is shared with other sites. The stack creates and deletes only the three host records and their certificate validation records.
+
+  EeStackName:
+    Type: String
+    AllowedPattern: '^[a-zA-Z][-a-zA-Z0-9]{0,127}$'
+    ConstraintDescription: Must be a CloudFormation stack name of letters, digits and hyphens.
+    Description: >-
+      Name of the Neo4j EE stack that Hume joins. Hume needs a three-server
+      Neo4j EE stack in this account and Region. Hume runs in its VPC and
+      subnets, and it reads the Neo4j host, the app user, the password secret
+      and the network values that the Neo4j EE stack publishes in Parameter
+      Store under /neo4j-ee/<name>/. A wrong name or a one-server stack fails
+      the create within a minute. Nothing that the stack keeps on delete is
+      created before that check.
+
+  Neo4jTruststoreSecretArn:
+    Type: String
+    AllowedPattern: '^arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:\d{12}:secret:[A-Za-z0-9/_+=.@-]+-[A-Za-z0-9]{6}$'
+    ConstraintDescription: Must be a full Secrets Manager secret ARN, including the six-character suffix.
+    Description: >-
+      ARN of the secret that holds a truststore for the
+      certificate authority of the Neo4j load balancer. Its SecretString is
+      JSON with two keys. truststore is the truststore file, base64.
+      java_tool_options is the full JAVA_TOOL_OPTIONS value for Orchestra and
+      the API, so the truststore type and password travel with the file. The
+      value must point at /opt/hume-truststore, the path where both tasks see
+      the file. The instance writes the file to the host at boot and checks
+      that both keys are set. The JVM may print the option string in the
+      Orchestra and API logs, so the truststore must hold only certificates
+      and a password that protects nothing else. The truststore replaces the
+      default roots of both JVMs, so it must also hold the roots of the
+      identity provider, which the API calls for its signing keys.
+
+  AuthProvider:
+    Type: String
+    Default: Oidc
+    AllowedValues:
+      - Oidc
+      - Native
+    Description: >-
+      Oidc signs users in through the customer's OpenID Connect provider, and a
+      provider group grants the Hume administrator role. Native uses Hume's own
+      user store with a generated administrator password. Native is a fallback
+      for troubleshooting.
+
+  OidcIssuerUri:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(https://\S+[^/\s])?$'
+    ConstraintDescription: Must be empty or an https URL without a trailing slash.
+    Description: >-
+      Oidc only. The issuer URL of the OpenID Connect provider, exactly as its
+      discovery document gives it.
+
+  OidcClientId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^\S*$'
+    ConstraintDescription: Must be empty or a client id without spaces.
+    Description: >-
+      Oidc only. The id of the public client that hume-web signs in with. The
+      client must allow the authorization code flow and the Hume web address
+      as a callback.
+
+  OidcRolesMappings:
+    Type: String
+    Default: hume-admins=ADMINISTRATOR,hume-users=USER
+    AllowedPattern: '^[^=,\s]+=[^=,\s]+(,[^=,\s]+=[^=,\s]+)*$'
+    ConstraintDescription: >-
+      Must be one or more group=ROLE pairs separated by commas, without spaces.
+    Description: >-
+      Oidc only. The provider groups and the Hume role each one grants, as
+      group=ROLE pairs separated by commas. A user whose groups map to no role
+      cannot sign in.
+
+  OidcRolesClaimPath:
+    Type: String
+    Default: "$['cognito:groups']"
+    AllowedPattern: '^\$\S+$'
+    ConstraintDescription: Must be a JsonPath that starts with $.
+    Description: >-
+      Oidc only. The JsonPath of the groups claim in the token. The default is
+      the Amazon Cognito claim. A claim name with a colon needs the bracket
+      form.
+
+  OidcPrincipalClaim:
+    Type: String
+    Default: username
+    AllowedPattern: '^\S+$'
+    ConstraintDescription: Must be one claim name without spaces.
+    Description: >-
+      Oidc only. The claim that holds the user name. The default is the claim
+      in an Amazon Cognito access token.
+
+  OidcJwkSetUri:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(https://\S+)?$'
+    ConstraintDescription: Must be empty or an https URL.
+    Description: >-
+      Oidc only. The address of the provider's signing keys, the jwks_uri value
+      in its discovery document. Leave it empty for Amazon Cognito. An empty
+      value uses the issuer URL with /.well-known/jwks.json added.
+
+  OidcScope:
+    Type: String
+    Default: openid profile email
+    AllowedPattern: '^(\S+ )*openid( \S+)*$'
+    ConstraintDescription: Must be scopes separated by single spaces, including openid.
+    Description: >-
+      Oidc only. The scopes that hume-web requests at sign-in, separated by
+      spaces. Microsoft Entra ID needs the scope of the exposed API here, so
+      that the access token is issued for that API.
+
+  SpineConfigSecretArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^(arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:\d{12}:secret:[A-Za-z0-9/_+=.@-]+-[A-Za-z0-9]{6})?$'
+    ConstraintDescription: Must be empty or a full Secrets Manager secret ARN, including the six-character suffix.
+    Description: >-
+      Spine demo only. Full ARN of the secret hume/<stack name>/spine-config,
+      including its six-character suffix. ECS reads a Secrets Manager secret
+      only by its full ARN. Leave it empty on create. Set it by an update
+      after the spine database is loaded on the Neo4j cluster. The update then
+      runs the hume-config-cli configuration import that creates the SPINE
+      knowledge graph. While it is empty, the stack runs no configuration
+      import.
+
+Rules:
+  OidcNeedsIssuerAndClient:
+    RuleCondition: !Equals [!Ref AuthProvider, Oidc]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref OidcIssuerUri, '']]
+        AssertDescription: OidcIssuerUri is required when AuthProvider is Oidc.
+      - Assert: !Not [!Equals [!Ref OidcClientId, '']]
+        AssertDescription: OidcClientId is required when AuthProvider is Oidc.
+
+  # Native sign-in has one shared administrator password, so the UI must not be
+  # open to the internet with it.
+  NativeIsNotPublic:
+    RuleCondition: !Equals [!Ref AuthProvider, Native]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AllowedCidr1, 0.0.0.0/0]]
+        AssertDescription: >-
+          AuthProvider must be Oidc when AllowedCidr1 is 0.0.0.0/0. Native
+          sign-in is not allowed on a load balancer open to the internet.
+      - Assert: !Not [!Equals [!Ref AllowedCidr2, 0.0.0.0/0]]
+        AssertDescription: >-
+          AuthProvider must be Oidc when AllowedCidr2 is 0.0.0.0/0. Native
+          sign-in is not allowed on a load balancer open to the internet.
+      - Assert: !Not [!Equals [!Ref AllowedCidr3, 0.0.0.0/0]]
+        AssertDescription: >-
+          AuthProvider must be Oidc when AllowedCidr3 is 0.0.0.0/0. Native
+          sign-in is not allowed on a load balancer open to the internet.
+      - Assert: !Not [!Equals [!Ref AllowedCidr4, 0.0.0.0/0]]
+        AssertDescription: >-
+          AuthProvider must be Oidc when AllowedCidr4 is 0.0.0.0/0. Native
+          sign-in is not allowed on a load balancer open to the internet.
+      - Assert: !Not [!Equals [!Ref AllowedCidr5, 0.0.0.0/0]]
+        AssertDescription: >-
+          AuthProvider must be Oidc when AllowedCidr5 is 0.0.0.0/0. Native
+          sign-in is not allowed on a load balancer open to the internet.
+
+  # A restored database and a kept file system stay encrypted with the key of
+  # the earlier stack, so the stack must adopt that key.
+  SnapshotNeedsExistingKey:
+    RuleCondition: !Not [!Equals [!Ref DbSnapshotIdentifier, '']]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ExistingDataKeyArn, '']]
+        AssertDescription: >-
+          ExistingDataKeyArn is required when DbSnapshotIdentifier is set. Use
+          the DataKeyArn output of the earlier stack.
+
+  FileSystemNeedsExistingKey:
+    RuleCondition: !Not [!Equals [!Ref ExistingFileSystemId, '']]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ExistingDataKeyArn, '']]
+        AssertDescription: >-
+          ExistingDataKeyArn is required when ExistingFileSystemId is set. Use
+          the DataKeyArn output of the earlier stack.
+
+Conditions:
+  UseOidc: !Equals [!Ref AuthProvider, Oidc]
+  UseOidcJwkSetUri: !Not [!Equals [!Ref OidcJwkSetUri, '']]
+  UseNativeAuth: !Equals [!Ref AuthProvider, Native]
+  UseSpineImport: !Not [!Equals [!Ref SpineConfigSecretArn, '']]
+  UseAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+  UseCidr2: !Not [!Equals [!Ref AllowedCidr2, '']]
+  UseCidr3: !Not [!Equals [!Ref AllowedCidr3, '']]
+  UseCidr4: !Not [!Equals [!Ref AllowedCidr4, '']]
+  UseCidr5: !Not [!Equals [!Ref AllowedCidr5, '']]
+  CreateDataKey: !Equals [!Ref ExistingDataKeyArn, '']
+  CreateFileSystem: !Equals [!Ref ExistingFileSystemId, '']
+  RestoreDatabase: !Not [!Equals [!Ref DbSnapshotIdentifier, '']]
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Network. The stack creates no VPC or subnets. It runs in the VPC of the
+  # Neo4j EE stack and uses the subnets that the Neo4jEeLookup resource reads.
+  # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  # Neo4j EE lookup (Custom::Neo4jEeLookup). On Create and Update the function
+  # reads the values that the Neo4j EE stack publishes under
+  # /neo4j-ee/<EeStackName>/ and returns them as attributes. Every resource that
+  # uses one waits for it, so a missing or one-server Neo4j EE stack fails the
+  # create before anything else exists. Update also runs the lookup, because a
+  # rollback sends Update with the old properties and needs the attributes back.
+  # Delete does nothing and keeps the physical id.
+  # ---------------------------------------------------------------------------
+  Neo4jEeLookupLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-neo4j-ee-lookup'
+      RetentionInDays: !Ref LogRetentionDays
+
+  Neo4jEeLookupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ReadNeo4jEeParameters
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameters
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/neo4j-ee/${EeStackName}/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt Neo4jEeLookupLogGroup.Arn
+
+  Neo4jEeLookupFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: Neo4jEeLookupLogGroup
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-neo4j-ee-lookup'
+      Runtime: python3.13
+      Handler: index.handler
+      Role: !GetAtt Neo4jEeLookupRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+
+          ssm = boto3.client("ssm")
+          # Each attribute and the name under /neo4j-ee/<stack>/ that holds it.
+          ATTRIBUTES = {
+              "Neo4jHost": "advertised-dns",
+              "VpcId": "vpc-id",
+              "PublicSubnet1Id": "public-subnet-1-id",
+              "PublicSubnet2Id": "public-subnet-2-id",
+              "PublicSubnet3Id": "public-subnet-3-id",
+              "PrivateSubnet1Id": "private-subnet-1-id",
+              "PrivateSubnet2Id": "private-subnet-2-id",
+              "Neo4jNlbSecurityGroupId": "external-sg-id",
+              "VpcEndpointSecurityGroupId": "vpc-endpoint-sg-id",
+              "Neo4jUsername": "app-username",
+              "Neo4jAppPasswordSecretArn": "app-password-secret-arn",
+              "Neo4jSecretsKmsKeyArn": "kms-key-arn",
+          }
+          # A one-server Neo4j EE stack publishes only the first public subnet.
+          ONE_SERVER_MISSING = {"public-subnet-2-id", "public-subnet-3-id"}
+          # GetParameters takes at most 10 names in one call.
+          BATCH_SIZE = 10
+
+
+          def read_values(stack):
+              prefix = f"/neo4j-ee/{stack}/"
+              names = [prefix + name for name in ATTRIBUTES.values()]
+              found = {}
+              for start in range(0, len(names), BATCH_SIZE):
+                  response = ssm.get_parameters(Names=names[start : start + BATCH_SIZE])
+                  for parameter in response["Parameters"]:
+                      found[parameter["Name"].removeprefix(prefix)] = parameter["Value"]
+              return found
+
+
+          def lookup(stack):
+              found = read_values(stack)
+              missing = [name for name in ATTRIBUTES.values() if name not in found]
+              if len(missing) == len(ATTRIBUTES):
+                  raise ValueError(
+                      f"No Neo4j EE stack named {stack} in this account and Region. "
+                      "Deploy Neo4j EE from AWS Marketplace first."
+                  )
+              if set(missing) == ONE_SERVER_MISSING:
+                  raise ValueError(
+                      f"Neo4j EE stack {stack} has one server. Hume needs a "
+                      "three-server Neo4j EE stack. Deploy Neo4j EE with "
+                      "NumberOfServers 3."
+                  )
+              if missing:
+                  raise ValueError(
+                      f"Neo4j EE stack {stack} does not publish "
+                      f"{', '.join(missing)} under /neo4j-ee/{stack}/."
+                  )
+              return {attribute: found[name] for attribute, name in ATTRIBUTES.items()}
+
+
+          def handler(event, context):
+              physical_id = event.get("PhysicalResourceId", event["LogicalResourceId"])
+              if event["RequestType"] == "Delete":
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physical_id)
+                  return
+              stack = event["ResourceProperties"]["EeStackName"]
+              # Every error must reach CloudFormation, or the stack waits for the
+              # service timeout.
+              try:
+                  data = lookup(stack)
+              except Exception as exc:
+                  print(f"{event['RequestType']} failed: {exc}")
+                  cfnresponse.send(
+                      event, context, cfnresponse.FAILED, {}, physical_id,
+                      reason=str(exc)[:1000],
+                  )
+                  return
+              print(f"Read {len(data)} values of Neo4j EE stack {stack}")
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, data, physical_id)
+
+  Neo4jEeLookup:
+    Type: Custom::Neo4jEeLookup
+    Properties:
+      ServiceToken: !GetAtt Neo4jEeLookupFunction.Arn
+      ServiceTimeout: 120
+      EeStackName: !Ref EeStackName
+
+  # ---------------------------------------------------------------------------
+  # Security groups.
+  # Each group sets a placeholder egress rule inline. That removes the default
+  # allow-all egress rule, and the real rules are separate resources so the
+  # groups can refer to each other without a dependency cycle.
+  # ---------------------------------------------------------------------------
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Hume load balancer. Inbound from the allowed range only.
+      VpcId: !GetAtt Neo4jEeLookup.VpcId
+      SecurityGroupEgress:
+        - Description: Placeholder that removes the default allow-all egress rule
+          IpProtocol: '-1'
+          CidrIp: 127.0.0.1/32
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-alb'
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Hume container instance and the awsvpc tasks that run on it.
+      VpcId: !GetAtt Neo4jEeLookup.VpcId
+      SecurityGroupEgress:
+        - Description: Placeholder that removes the default allow-all egress rule
+          IpProtocol: '-1'
+          CidrIp: 127.0.0.1/32
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-instance'
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Hume RDS instance. Inbound PostgreSQL from the instance group only.
+      VpcId: !GetAtt Neo4jEeLookup.VpcId
+      SecurityGroupIngress:
+        - Description: PostgreSQL from Hume tasks
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref InstanceSecurityGroup
+      SecurityGroupEgress:
+        - Description: Placeholder that removes the default allow-all egress rule
+          IpProtocol: '-1'
+          CidrIp: 127.0.0.1/32
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-database'
+
+  EfsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Hume EFS mount targets. Inbound NFS from the instance group only.
+      VpcId: !GetAtt Neo4jEeLookup.VpcId
+      SecurityGroupIngress:
+        - Description: NFS from the Hume instance and tasks
+          IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref InstanceSecurityGroup
+      SecurityGroupEgress:
+        - Description: Placeholder that removes the default allow-all egress rule
+          IpProtocol: '-1'
+          CidrIp: 127.0.0.1/32
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-efs'
+
+  # The load balancer listens on 443, and on 80 only to redirect to 443. Both
+  # ports take the same allowlist, because the redirect must reach the same
+  # people. One rule per allowed address and port. Each rule is tied to its
+  # slot, not to its address, so an address never moves between rules and an
+  # update never asks for a duplicate. Slot 1 always exists. Slots 2 to 5 exist
+  # while their parameter is not empty. 5 slots x 2 ports = 10 rules, under the
+  # limit of 60 inbound rules per security group.
+  AlbIngressHttps:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      Description: Hume over HTTPS
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: !Ref AllowedCidr1
+
+  AlbIngressHttps2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: UseCidr2
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      Description: Hume over HTTPS
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: !Ref AllowedCidr2
+
+  AlbIngressHttps3:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: UseCidr3
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      Description: Hume over HTTPS
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: !Ref AllowedCidr3
+
+  AlbIngressHttps4:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: UseCidr4
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      Description: Hume over HTTPS
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: !Ref AllowedCidr4
+
+  AlbIngressHttps5:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: UseCidr5
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      Description: Hume over HTTPS
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: !Ref AllowedCidr5
+
+  AlbIngressHttp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      Description: Redirect to HTTPS
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: !Ref AllowedCidr1
+
+  AlbIngressHttp2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: UseCidr2
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      Description: Redirect to HTTPS
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: !Ref AllowedCidr2
+
+  AlbIngressHttp3:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: UseCidr3
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      Description: Redirect to HTTPS
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: !Ref AllowedCidr3
+
+  AlbIngressHttp4:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: UseCidr4
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      Description: Redirect to HTTPS
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: !Ref AllowedCidr4
+
+  AlbIngressHttp5:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: UseCidr5
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      Description: Redirect to HTTPS
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: !Ref AllowedCidr5
+
+  # Targets: web 8081, api 8080 (one range), media service 8008. The api and
+  # media health checks also use the management port 7001. Each task has its
+  # own network interface, so every service can use the same management port.
+  AlbEgressWebAndApi:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      Description: To the web and API tasks
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8081
+      DestinationSecurityGroupId: !Ref InstanceSecurityGroup
+
+  AlbEgressMedia:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      Description: To the media task
+      IpProtocol: tcp
+      FromPort: 8008
+      ToPort: 8008
+      DestinationSecurityGroupId: !Ref InstanceSecurityGroup
+
+  AlbEgressManagementHealth:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      Description: To the api and media management port for the health checks
+      IpProtocol: tcp
+      FromPort: 7001
+      ToPort: 7001
+      DestinationSecurityGroupId: !Ref InstanceSecurityGroup
+
+  InstanceIngressFromAlbWebAndApi:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: Web and API from the load balancer
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8081
+      SourceSecurityGroupId: !Ref AlbSecurityGroup
+
+  InstanceIngressFromAlbMedia:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: Media from the load balancer
+      IpProtocol: tcp
+      FromPort: 8008
+      ToPort: 8008
+      SourceSecurityGroupId: !Ref AlbSecurityGroup
+
+  InstanceIngressFromAlbManagementHealth:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: Api and media health checks from the load balancer
+      IpProtocol: tcp
+      FromPort: 7001
+      ToPort: 7001
+      SourceSecurityGroupId: !Ref AlbSecurityGroup
+
+  # Service to service ports, from the ports the Hume containers listen on. Egress inside
+  # the group is open on all ports, and these ingress rules set the real limits.
+  InstanceIngressSelfMedia:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: Media service between tasks
+      IpProtocol: tcp
+      FromPort: 8008
+      ToPort: 8008
+      SourceSecurityGroupId: !Ref InstanceSecurityGroup
+
+  InstanceIngressSelfWebAndApi:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: API and event store 8080, web 8081, between tasks
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8081
+      SourceSecurityGroupId: !Ref InstanceSecurityGroup
+
+  InstanceIngressSelfOrchestra:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: Orchestra API between tasks
+      IpProtocol: tcp
+      FromPort: 8100
+      ToPort: 8100
+      SourceSecurityGroupId: !Ref InstanceSecurityGroup
+
+  InstanceIngressSelfWebhooks:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: Orchestra webhooks between tasks
+      IpProtocol: tcp
+      FromPort: 8666
+      ToPort: 8666
+      SourceSecurityGroupId: !Ref InstanceSecurityGroup
+
+  InstanceIngressSelfSecurity:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: API security server between tasks
+      IpProtocol: tcp
+      FromPort: 9080
+      ToPort: 9080
+      SourceSecurityGroupId: !Ref InstanceSecurityGroup
+
+  InstanceIngressSelfEventstore:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: Event store between tasks
+      IpProtocol: tcp
+      FromPort: 9090
+      ToPort: 9090
+      SourceSecurityGroupId: !Ref InstanceSecurityGroup
+
+  InstanceEgressSelf:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: Tasks to tasks
+      IpProtocol: '-1'
+      DestinationSecurityGroupId: !Ref InstanceSecurityGroup
+
+  InstanceEgressHttps:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: HTTPS to the ECS, Secrets Manager, CloudWatch Logs, and Systems Manager endpoints
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+
+  InstanceEgressDatabase:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: PostgreSQL to RDS
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref DatabaseSecurityGroup
+
+  # The ECS volume plugin on the host and the task network interfaces both use
+  # the instance group, so this one rule covers whichever side mounts EFS.
+  InstanceEgressEfs:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: NFS to the EFS mount targets
+      IpProtocol: tcp
+      FromPort: 2049
+      ToPort: 2049
+      DestinationSecurityGroupId: !Ref EfsSecurityGroup
+
+  # Three rules connect the Hume tasks to the Neo4j stack.
+  # Each is a separate resource, so deleting this stack removes it, and the
+  # Neo4j stack's own rules are never edited.
+  InstanceEgressNeo4jBolt:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      Description: Bolt to the Neo4j load balancer
+      IpProtocol: tcp
+      FromPort: 7687
+      ToPort: 7687
+      DestinationSecurityGroupId: !GetAtt Neo4jEeLookup.Neo4jNlbSecurityGroupId
+
+  Neo4jNlbIngressFromHume:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt Neo4jEeLookup.Neo4jNlbSecurityGroupId
+      Description: !Sub 'Bolt from the Hume tasks of ${AWS::StackName}'
+      IpProtocol: tcp
+      FromPort: 7687
+      ToPort: 7687
+      SourceSecurityGroupId: !Ref InstanceSecurityGroup
+
+  VpcEndpointIngressFromHume:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt Neo4jEeLookup.VpcEndpointSecurityGroupId
+      Description: !Sub 'HTTPS from the Hume tasks of ${AWS::StackName}'
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref InstanceSecurityGroup
+
+  # ---------------------------------------------------------------------------
+  # IAM
+  # ---------------------------------------------------------------------------
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      # No managed policies. EcsAgent and SsmAgent below list the actions of
+      # AmazonEC2ContainerServiceforEC2Role and AmazonSSMManagedInstanceCore
+      # that this stack uses, tied to this cluster where the action allows it.
+      Policies:
+        # The ECS agent on the instance. The actions come from
+        # https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonEC2ContainerServiceforEC2Role.html
+        # and the resource types from the ECS entry in the Service Authorization
+        # Reference, https://servicereference.us-east-1.amazonaws.com/v1/ecs/ecs.json
+        # The ECR and logs actions of the managed policy are left out. Task
+        # images come from the pre-baked AMI and no task pulls from a registry
+        # (ECS_IMAGE_PULL_BEHAVIOR=prefer-cached), and the task execution role
+        # writes the task logs.
+        - PolicyName: EcsAgent
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Actions on the cluster.
+              - Effect: Allow
+                Action:
+                  - ecs:CreateCluster
+                  - ecs:DeregisterContainerInstance
+                  - ecs:RegisterContainerInstance
+                  - ecs:SubmitAttachmentStateChanges
+                  - ecs:SubmitContainerStateChange
+                  - ecs:SubmitTaskStateChange
+                Resource: !GetAtt Cluster.Arn
+              # Actions on this cluster's container instances.
+              - Effect: Allow
+                Action:
+                  - ecs:Poll
+                  - ecs:StartTelemetrySession
+                  - ecs:UpdateContainerInstancesState
+                Resource: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:container-instance/${Cluster}/*'
+              # The agent tags the cluster and the instance it registers.
+              - Effect: Allow
+                Action: ecs:TagResource
+                Resource:
+                  - !GetAtt Cluster.Arn
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:container-instance/${Cluster}/*'
+                Condition:
+                  StringEquals:
+                    ecs:CreateAction:
+                      - CreateCluster
+                      - RegisterContainerInstance
+              - Effect: Allow
+                Action: ecs:ListTagsForResource
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:container-instance/${Cluster}/*'
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/${Cluster}/*'
+              # ecs:DiscoverPollEndpoint and ec2:DescribeTags have no
+              # resource-level form. The agent reads the instance tags only when
+              # tag propagation is set, which this AMI does not set. Kept from
+              # the managed policy, and not proven to be needed.
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeTags
+                  - ecs:DiscoverPollEndpoint
+                Resource: '*'
+        # The SSM agent, for Run Command and Session Manager. The actions come
+        # from
+        # https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonSSMManagedInstanceCore.html
+        # and the resource types from
+        # https://servicereference.us-east-1.amazonaws.com/v1/ssm/ssm.json
+        # Left out: ssm:GetParameter and ssm:GetParameters, because neither
+        # agent reads a parameter at run time (the ECS-optimized AMI id
+        # parameter is read by the deployer, not the instance), and the
+        # patch, inventory, compliance and package actions, which this stack
+        # does not use.
+        - PolicyName: SsmAgent
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Actions on an EC2 instance of this account and Region.
+              - Effect: Allow
+                Action:
+                  - ssm:UpdateInstanceInformation
+                Resource: !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+              # Association polling. AWS owned documents have no account id in
+              # their ARN.
+              - Effect: Allow
+                Action:
+                  - ssm:DescribeAssociation
+                  - ssm:ListInstanceAssociations
+                  - ssm:UpdateAssociationStatus
+                  - ssm:UpdateInstanceAssociationStatus
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:association/*'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/*'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}::document/*'
+              - Effect: Allow
+                Action:
+                  - ssm:DescribeDocument
+                  - ssm:GetDocument
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/*'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}::document/*'
+              # These actions have no resource-level form. The agent calls the
+              # ec2messages and ssmmessages endpoints with the instance role.
+              - Effect: Allow
+                Action:
+                  - ec2messages:AcknowledgeMessage
+                  - ec2messages:DeleteMessage
+                  - ec2messages:FailMessage
+                  - ec2messages:GetEndpoint
+                  - ec2messages:GetMessages
+                  - ec2messages:SendReply
+                  - ssm:ListAssociations
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: '*'
+        # The instance enables ENI trunking for its own role from user data.
+        # ECS only lets the root user set it for another principal. These
+        # actions do not support resource-level permissions.
+        - PolicyName: EniTrunking
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:ListAccountSettings
+                  - ecs:ListAttributes
+                  - ecs:PutAccountSetting
+                Resource: '*'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+
+  # Used by the ECS agent to start tasks and write their logs. The Secrets
+  # Manager read statements the services need are in TaskExecutionSecretsPolicy.
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+
+  # The task role of the API and Orchestra. Their AWS vault provider reads the
+  # neo4j_app password from Secrets Manager at run time, so a Hume resource
+  # holds a reference to the secret and never the password. The role may read
+  # that one secret, and decrypt with the Neo4j stack key only through Secrets
+  # Manager for that secret. The vault client uses the task role credentials,
+  # with no profile and no access keys.
+  VaultTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: read-neo4j-app-password
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !GetAtt Neo4jEeLookup.Neo4jAppPasswordSecretArn
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !GetAtt Neo4jEeLookup.Neo4jSecretsKmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub 'secretsmanager.${AWS::Region}.${AWS::URLSuffix}'
+                    kms:EncryptionContext:SecretARN: !GetAtt Neo4jEeLookup.Neo4jAppPasswordSecretArn
+
+  # ---------------------------------------------------------------------------
+  # Cluster, launch template, Auto Scaling group, capacity provider
+  # ---------------------------------------------------------------------------
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref AWS::StackName
+
+  InstanceLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${AWS::StackName}-instance'
+      LaunchTemplateData:
+        ImageId: !Ref HumeAmiId
+        InstanceType: !Ref InstanceType
+        # No KeyName on purpose. Access is through Session Manager.
+        IamInstanceProfile:
+          Arn: !GetAtt InstanceProfile.Arn
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: required
+          HttpPutResponseHopLimit: 1
+        # ENI trunking requires resource-based DNS A records to be off.
+        PrivateDnsNameOptions:
+          HostnameType: ip-name
+          EnableResourceNameDnsARecord: false
+          EnableResourceNameDnsAAAARecord: false
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: !Ref RootVolumeSize
+              VolumeType: gp3
+              Encrypted: true
+              DeleteOnTermination: true
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: false
+            DeleteOnTermination: true
+            Groups:
+              - !Ref InstanceSecurityGroup
+        # The script signals InstanceBootComplete. Any failure signals FAILURE,
+        # so the stack stops there instead of waiting out the timeout. The
+        # WaitCondition may not exist yet when the script ends, so signal()
+        # retries until it does. On a replacement instance the WaitCondition
+        # is already complete, and signal() returns at once.
+        # The truststore value goes from the CLI to python3 through a pipe, never
+        # through argv. Bash variables use $NAME without braces so that
+        # Fn::Sub leaves them alone. One value comes from the map after the
+        # script. TruststoreStep starts with a newline and writes the
+        # truststore file.
+        UserData:
+          Fn::Base64: !Sub
+            - |
+              #!/bin/bash
+              set -Eeuo pipefail
+              export AWS_DEFAULT_REGION=${AWS::Region}
+              INSTANCE_ID=unknown
+
+              signal() {
+                for attempt in $(seq 1 40); do
+                  STATUS=$(aws cloudformation describe-stack-resource \
+                    --stack-name ${AWS::StackName} \
+                    --logical-resource-id InstanceBootComplete \
+                    --query StackResourceDetail.ResourceStatus \
+                    --output text 2>/dev/null || echo MISSING)
+                  case $STATUS in
+                    CREATE_IN_PROGRESS)
+                      if aws cloudformation signal-resource \
+                        --stack-name ${AWS::StackName} \
+                        --logical-resource-id InstanceBootComplete \
+                        --unique-id "$INSTANCE_ID" --status "$1"; then
+                        return 0
+                      fi ;;
+                    MISSING) ;;
+                    *)
+                      echo "InstanceBootComplete is $STATUS, nothing to signal"
+                      return 0 ;;
+                  esac
+                  echo "Signal $1 not sent (attempt $attempt of 40)"
+                  sleep 15
+                done
+                return 1
+              }
+              trap 'echo "Hume boot failed"; signal FAILURE || true' ERR
+
+              # Enable ENI trunking for the instance role only. There is no
+              # principalArn, so the account default is untouched. The smoke
+              # test asserts the trunk attribute, so a late finish fails loudly.
+              aws ecs put-account-setting --name awsvpcTrunking --value enabled --region ${AWS::Region}
+
+              TOKEN=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token \
+                -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')
+              INSTANCE_ID=$(curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" \
+                http://169.254.169.254/latest/meta-data/instance-id)
+
+              # The AMI holds every other agent setting. The first echo makes
+              # sure ECS_CLUSTER starts on its own line.
+              echo "" >> /etc/ecs/ecs.config
+              echo "ECS_CLUSTER=${Cluster}" >> /etc/ecs/ecs.config
+
+              umask 077${TruststoreStep}
+
+              # The || keeps a failed signal from tripping the ERR trap.
+              signal SUCCESS || echo "Could not signal SUCCESS to InstanceBootComplete"
+            - TruststoreStep: !Sub |-
+
+                # Truststore for the CA of the Neo4j load balancer. The task
+                # reads the file through a bind mount, and the secret also holds the JAVA_TOOL_OPTIONS
+                # value that the task receives. Only the file is written here.
+                # The truststore password is not a secret. The file holds public
+                # CA certificates only, and the JVM prints JAVA_TOOL_OPTIONS to
+                # stderr, so the value reaches the log group. Use a password made
+                # for this file and never a real one. Another task definition,
+                # such as a one-time cypher-shell task, can read the same secret
+                # and mount the same host file with no change to this template.
+                TRUSTSTORE_DIR=/opt/hume/truststore
+                install -d -m 0700 -o 1001 -g 1001 $TRUSTSTORE_DIR
+
+                write_truststore() {
+                  aws secretsmanager get-secret-value \
+                    --secret-id "${Neo4jTruststoreSecretArn}" \
+                    --query SecretString --output text |
+                    python3 -c '
+                import base64, json, sys
+                secret = json.load(sys.stdin)
+                for key in ("truststore", "java_tool_options"):
+                    if not secret.get(key):
+                        sys.exit(f"The truststore secret has no {key} value")
+                data = "".join(secret["truststore"].split())
+                sys.stdout.buffer.write(base64.b64decode(data, validate=True))
+                ' > $TRUSTSTORE_DIR/hume-truststore.tmp
+                }
+
+                # Retry for a while, because a new instance role policy can take
+                # time to apply. A missing secret still fails after the retries.
+                TRUSTSTORE_WRITTEN=no
+                for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+                  if write_truststore; then
+                    TRUSTSTORE_WRITTEN=yes
+                    break
+                  fi
+                  echo "Truststore secret read failed (attempt $attempt of 12)"
+                  sleep 10
+                done
+                [ "$TRUSTSTORE_WRITTEN" = yes ]
+                chown 1001:1001 $TRUSTSTORE_DIR/hume-truststore.tmp
+                chmod 0600 $TRUSTSTORE_DIR/hume-truststore.tmp
+                mv -f $TRUSTSTORE_DIR/hume-truststore.tmp $TRUSTSTORE_DIR/hume-truststore
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub '${AWS::StackName}-instance'
+          - ResourceType: volume
+            Tags:
+              - Key: Name
+                Value: !Sub '${AWS::StackName}-instance'
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: InstanceBootPolicy
+    Properties:
+      MinSize: '1'
+      MaxSize: '1'
+      DesiredCapacity: '1'
+      VPCZoneIdentifier:
+        - !GetAtt Neo4jEeLookup.PrivateSubnet1Id
+      HealthCheckType: EC2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref InstanceLaunchTemplate
+        Version: !GetAtt InstanceLaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-instance'
+          PropagateAtLaunch: true
+
+  CapacityProvider:
+    Type: AWS::ECS::CapacityProvider
+    Properties:
+      AutoScalingGroupProvider:
+        AutoScalingGroupArn: !Ref AutoScalingGroup
+        ManagedScaling:
+          Status: DISABLED
+        ManagedTerminationProtection: DISABLED
+
+  ClusterCapacityProviderAssociation:
+    Type: AWS::ECS::ClusterCapacityProviderAssociations
+    Properties:
+      Cluster: !Ref Cluster
+      CapacityProviders:
+        - !Ref CapacityProvider
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: !Ref CapacityProvider
+          Weight: 1
+
+  # ---------------------------------------------------------------------------
+  # Customer managed key for the stack secrets and the database. The key
+  # policy gives the account the right to delegate use through IAM, so each
+  # role that needs the key carries its own kms:Decrypt statement, and
+  # CloudTrail records each use. Rotation is on. The key is retained when the
+  # stack is deleted, because the final database snapshot and the file system
+  # are encrypted with it and could not be read once the key was scheduled for
+  # deletion. A stack that restores from an earlier one adopts that stack's key
+  # through ExistingDataKeyArn instead of creating one, so one key guards the
+  # database, its snapshots, the file system, and the secrets.
+  # ---------------------------------------------------------------------------
+  DataKey:
+    Type: AWS::KMS::Key
+    Condition: CreateDataKey
+    # A failed lookup must stop the create before this kept key exists.
+    DependsOn: Neo4jEeLookup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub 'Hume ${AWS::StackName} secrets and database'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+  DataKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/hume/${AWS::StackName}'
+      TargetKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+
+  # ---------------------------------------------------------------------------
+  # Secrets. Every password and key that the compose files hardcode is
+  # generated here. Punctuation is excluded so values are safe inside JDBC
+  # URLs and shell commands.
+  # ---------------------------------------------------------------------------
+  DbMasterSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/rds-master'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: RDS master login. Used only by the db-init task.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "humeadmin"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  DbMasterSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref DbMasterSecret
+      TargetId: !Ref Database
+      TargetType: AWS::RDS::DBInstance
+
+  ApiDbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/db-api'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: Login for the hume database used by the API.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "hume"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  OrchestraDbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/db-orchestra'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: Login for the orchestra database.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "orchestra"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  EventstoreDbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/db-eventstore'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: Login for the eventstore database.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "eventstore"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  MediaDbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/db-media'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: Login for the media database.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "media"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  EventstorePasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/eventstore-password'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: Value of hume.eventstore.password, shared by the API and the event store.
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  # Spine demo only. hume-config-cli signs in with this key, and nothing else
+  # uses API keys.
+  ApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: UseSpineImport
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/api-key'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: Initial admin API key, used by the API and hume-config-cli.
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  JwtKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: UseNativeAuth
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/jwt-key'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: Native JWT signing key shared by the API and media. The quickstart value is 128 hex characters, so this matches its length.
+      GenerateSecretString:
+        PasswordLength: 128
+        ExcludePunctuation: true
+
+  # ---------------------------------------------------------------------------
+  # Service keys. The API and media share four keys, and media also holds a
+  # maintenance key that no Hume service sends. Without these secrets every
+  # stack would run the defaults built into the images. Each key is its own secret, because media looks a key up by value
+  # and two equal keys would mix up their roles. The stack generates each value
+  # once. An update leaves it alone as long as GenerateSecretString is
+  # unchanged. Orchestra and the event store get none of them. ECS injects each
+  # key as a secret into the services listed on it:
+  #   ApiToMediaKeySecret    internal.hume.media.api-key on the API,
+  #                          hume.security.api-key.value on media
+  #   MediaToApiKeySecret    hume.security.api-key on the API and media
+  #   SymmetricKeySecret     hume.security.symmetric-key on the API and media
+  #   MediaDownloadKeySecret hume.security.api-key-download.value on the API
+  #                          and media
+  #   MaintenanceKeySecret   hume.security.api-key-maintenance.value on media
+  # Four of the keys are random values of 64 hex characters. The download key
+  # keeps its existing format, so that the update does not replace it.
+  # ---------------------------------------------------------------------------
+  MediaDownloadKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/media-download-key'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: Download key shared by the API and media. The API sends it when it downloads a file from media.
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  ApiToMediaKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/api-to-media-key'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: Key the API sends to media, set as internal.hume.media.api-key on the API and hume.security.api-key.value on media.
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+        ExcludeUppercase: true
+        ExcludeCharacters: ghijklmnopqrstuvwxyz
+
+  MediaToApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/media-to-api-key'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: Value of hume.security.api-key on the API and media.
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+        ExcludeUppercase: true
+        ExcludeCharacters: ghijklmnopqrstuvwxyz
+
+  SymmetricKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/symmetric-key'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: Value of hume.security.symmetric-key on the API and media. The API encrypts the caller's identity for media with it.
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+        ExcludeUppercase: true
+        ExcludeCharacters: ghijklmnopqrstuvwxyz
+
+  MaintenanceKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/maintenance-key'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: Value of hume.security.api-key-maintenance.value on media. No Hume service sends it.
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+        ExcludeUppercase: true
+        ExcludeCharacters: ghijklmnopqrstuvwxyz
+
+  # ---------------------------------------------------------------------------
+  # RDS. One instance holds the four Hume databases. Logical replication is a
+  # static parameter, so the group is attached at creation and no reboot is
+  # needed. The db-init task creates the databases and logins. Deletion
+  # protection is on and the stack keeps a final snapshot, so turn protection
+  # off before deleting the stack. The snapshot is encrypted with DataKey.
+  # With DbSnapshotIdentifier set, the instance is restored from that snapshot.
+  # A restore must not set the key or the master login, so those properties
+  # drop out. The restored instance keeps the snapshot's key, which is the key
+  # that ExistingDataKeyArn names, and the snapshot's master password, which
+  # DbMasterReset then replaces with the one in DbMasterSecret.
+  # ---------------------------------------------------------------------------
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Hume RDS subnets
+      SubnetIds:
+        - !GetAtt Neo4jEeLookup.PrivateSubnet1Id
+        - !GetAtt Neo4jEeLookup.PrivateSubnet2Id
+
+  DatabaseParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: Hume PostgreSQL parameters
+      Family: postgres17
+      Parameters:
+        rds.logical_replication: '1'
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      Engine: postgres
+      EngineVersion: !Ref DbEngineVersion
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: '20'
+      StorageType: gp3
+      StorageEncrypted: true
+      DBSnapshotIdentifier: !If [RestoreDatabase, !Ref DbSnapshotIdentifier, !Ref AWS::NoValue]
+      KmsKeyId: !If [RestoreDatabase, !Ref AWS::NoValue, !If [CreateDataKey, !GetAtt DataKey.Arn, !Ref ExistingDataKeyArn]]
+      MasterUsername: !If
+        - RestoreDatabase
+        - !Ref AWS::NoValue
+        - !Sub '{{resolve:secretsmanager:${DbMasterSecret}:SecretString:username}}'
+      MasterUserPassword: !If
+        - RestoreDatabase
+        - !Ref AWS::NoValue
+        - !Sub '{{resolve:secretsmanager:${DbMasterSecret}:SecretString:password}}'
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      DBParameterGroupName: !Ref DatabaseParameterGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: !Ref DbBackupRetentionDays
+      DeletionProtection: true
+      CopyTagsToSnapshot: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-database'
+
+  # ---------------------------------------------------------------------------
+  # EFS for the data that Orchestra, the API audit log, and media write. The
+  # data then outlives the instance, the AMI, and the stack. The file system is
+  # retained when the stack is deleted, and AWS Backup takes a daily backup.
+  # With ExistingFileSystemId set, the stack uses a file system kept from an
+  # earlier stack instead. Either way the stack creates the mount targets and
+  # the access points. Each access point runs as uid 1001 and roots the
+  # container in its own directory. The directory is created with mode 0700
+  # only when it is missing, so a kept file system keeps its data. Mount
+  # targets go in the first two private subnets. The instance and the tasks
+  # run in the first.
+  # ---------------------------------------------------------------------------
+  DataFileSystem:
+    Type: AWS::EFS::FileSystem
+    Condition: CreateFileSystem
+    # A failed lookup must stop the create before this kept file system exists.
+    DependsOn: Neo4jEeLookup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Encrypted: true
+      KmsKeyId: !If [CreateDataKey, !GetAtt DataKey.Arn, !Ref ExistingDataKeyArn]
+      PerformanceMode: generalPurpose
+      ThroughputMode: elastic
+      BackupPolicy:
+        Status: ENABLED
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-data'
+
+  DataMountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !If [CreateFileSystem, !Ref DataFileSystem, !Ref ExistingFileSystemId]
+      SubnetId: !GetAtt Neo4jEeLookup.PrivateSubnet1Id
+      SecurityGroups:
+        - !Ref EfsSecurityGroup
+
+  DataMountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !If [CreateFileSystem, !Ref DataFileSystem, !Ref ExistingFileSystemId]
+      SubnetId: !GetAtt Neo4jEeLookup.PrivateSubnet2Id
+      SecurityGroups:
+        - !Ref EfsSecurityGroup
+
+  OrchestraAccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !If [CreateFileSystem, !Ref DataFileSystem, !Ref ExistingFileSystemId]
+      PosixUser:
+        Uid: '1001'
+        Gid: '1001'
+      RootDirectory:
+        Path: /orchestra
+        CreationInfo:
+          OwnerUid: '1001'
+          OwnerGid: '1001'
+          Permissions: '0700'
+      AccessPointTags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-orchestra'
+
+  AuditLogsAccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !If [CreateFileSystem, !Ref DataFileSystem, !Ref ExistingFileSystemId]
+      PosixUser:
+        Uid: '1001'
+        Gid: '1001'
+      RootDirectory:
+        Path: /audit-logs
+        CreationInfo:
+          OwnerUid: '1001'
+          OwnerGid: '1001'
+          Permissions: '0700'
+      AccessPointTags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-audit-logs'
+
+  MediaAccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !If [CreateFileSystem, !Ref DataFileSystem, !Ref ExistingFileSystemId]
+      PosixUser:
+        Uid: '1001'
+        Gid: '1001'
+      RootDirectory:
+        Path: /media
+        CreationInfo:
+          OwnerUid: '1001'
+          OwnerGid: '1001'
+          Permissions: '0700'
+      AccessPointTags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-media'
+
+  # ---------------------------------------------------------------------------
+  # Log groups, one per service and one-time task, plus the smoke test.
+  # ---------------------------------------------------------------------------
+  EventstoreLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/hume/${AWS::StackName}/eventstore'
+      RetentionInDays: !Ref LogRetentionDays
+
+  OrchestraLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/hume/${AWS::StackName}/orchestra'
+      RetentionInDays: !Ref LogRetentionDays
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/hume/${AWS::StackName}/api'
+      RetentionInDays: !Ref LogRetentionDays
+
+  MediaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/hume/${AWS::StackName}/media'
+      RetentionInDays: !Ref LogRetentionDays
+
+  WebLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/hume/${AWS::StackName}/web'
+      RetentionInDays: !Ref LogRetentionDays
+
+  DbInitLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/hume/${AWS::StackName}/db-init'
+      RetentionInDays: !Ref LogRetentionDays
+
+  ConfigCliLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: UseSpineImport
+    Properties:
+      LogGroupName: !Sub '/hume/${AWS::StackName}/config-cli'
+      RetentionInDays: !Ref LogRetentionDays
+
+  SmokeTestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/hume/${AWS::StackName}/smoke-test'
+      RetentionInDays: !Ref LogRetentionDays
+
+  # ---------------------------------------------------------------------------
+  # Smoke test task definition. The deploy helper runs it once to prove an
+  # awsvpc task starts from an image cached in the AMI. VersionConsistency is
+  # off so ECS does not contact a registry to resolve the image digest.
+  # ---------------------------------------------------------------------------
+  SmokeTestTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${AWS::StackName}-smoke-test'
+      RequiresCompatibilities:
+        - EC2
+      NetworkMode: awsvpc
+      Cpu: '256'
+      Memory: '256'
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: smoke
+          Image: postgres:17-alpine
+          Essential: true
+          VersionConsistency: disabled
+          Command:
+            - sh
+            - -c
+            - echo hume-smoke-ok
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref SmokeTestLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: smoke
+
+  # ---------------------------------------------------------------------------
+  # Instance boot. The role reads the truststore secret and signals the
+  # stack. It may also decrypt with the
+  # stack key, so it can read any stack secret.
+  # The CLI calls are signed with the instance role. DescribeStackResource
+  # lets a replacement instance see that there is nothing left to signal.
+  # ---------------------------------------------------------------------------
+  InstanceBootPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: HumeBoot
+      Roles:
+        - !Ref InstanceRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: !Ref Neo4jTruststoreSecretArn
+          - Effect: Allow
+            Action: kms:Decrypt
+            Resource: !If [CreateDataKey, !GetAtt DataKey.Arn, !Ref ExistingDataKeyArn]
+          - Effect: Allow
+            Action:
+              - cloudformation:DescribeStackResource
+              - cloudformation:SignalResource
+            Resource: !Ref AWS::StackId
+
+  # Completes when the boot script signals SUCCESS. It is created after the
+  # capacity provider association, so the tasks that wait on it start only
+  # once the instance and the cluster are both ready. A CreationPolicy on
+  # the Auto Scaling group would hold back the capacity provider until boot
+  # ended, after the ECS agent may have registered.
+  InstanceBootComplete:
+    Type: AWS::CloudFormation::WaitCondition
+    DependsOn:
+      - AutoScalingGroup
+      - ClusterCapacityProviderAssociation
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT15M
+
+  # ---------------------------------------------------------------------------
+  # One-time task custom resource (Custom::EcsRunTask). On Create and Update
+  # it runs one ECS task, waits for it to stop, and fails unless every
+  # container exits 0. Delete does nothing. To run a task again, change any
+  # property, such as RunId.
+  # ---------------------------------------------------------------------------
+  RunTaskLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-run-task'
+      RetentionInDays: !Ref LogRetentionDays
+
+  RunTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RunOneTimeTasks
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # The function runs db-init and config-cli.
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${AWS::StackName}-db-init:*'
+                  - !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${AWS::StackName}-config-cli:*'
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !GetAtt Cluster.Arn
+              - Effect: Allow
+                Action:
+                  - ecs:DescribeTasks
+                  - ecs:StopTask
+                Resource: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/${AWS::StackName}/*'
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !GetAtt Cluster.Arn
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt TaskExecutionRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ecs-tasks.amazonaws.com
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt RunTaskLogGroup.Arn
+
+  RunTaskFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: RunTaskLogGroup
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-run-task'
+      Runtime: python3.13
+      Handler: index.handler
+      Role: !GetAtt RunTaskRole.Arn
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import time
+
+          import boto3
+          import cfnresponse
+          from botocore.exceptions import ClientError
+
+          ecs = boto3.client("ecs")
+          POLL_SECONDS = 15
+          # Time kept back to stop the task and report before Lambda times out.
+          MARGIN_SECONDS = 60
+
+
+          def start_task(props, deadline):
+              """Start the task, retrying while the cluster cannot place it yet."""
+              request = {
+                  "cluster": props["Cluster"],
+                  "taskDefinition": props["TaskDefinition"],
+                  "count": 1,
+                  "startedBy": "cloudformation",
+                  "networkConfiguration": {
+                      "awsvpcConfiguration": {
+                          "subnets": props["Subnets"],
+                          "securityGroups": props["SecurityGroups"],
+                          "assignPublicIp": "DISABLED",
+                      }
+                  },
+              }
+              # Without it, RunTask uses the cluster's default strategy.
+              if props.get("CapacityProvider"):
+                  request["capacityProviderStrategy"] = [
+                      {"capacityProvider": props["CapacityProvider"], "weight": 1}
+                  ]
+              problem = None
+              while time.monotonic() < deadline:
+                  try:
+                      response = ecs.run_task(**request)
+                      if response["tasks"]:
+                          return response["tasks"][0]["taskArn"]
+                      problem = response["failures"]
+                  except ClientError as exc:
+                      if exc.response["Error"]["Code"] == "AccessDeniedException":
+                          raise
+                      problem = str(exc)
+                  print(f"RunTask did not start a task, retrying: {problem}")
+                  time.sleep(POLL_SECONDS)
+              raise TimeoutError(f"RunTask did not start a task: {problem}")
+
+
+          def describe_task(cluster, task_arn):
+              """Return the task, or None while ECS cannot report it yet."""
+              try:
+                  response = ecs.describe_tasks(cluster=cluster, tasks=[task_arn])
+              except ClientError as exc:
+                  if exc.response["Error"]["Code"] == "AccessDeniedException":
+                      raise
+                  print(f"DescribeTasks failed, retrying: {exc}")
+                  return None
+              if response["tasks"]:
+                  return response["tasks"][0]
+              # A task that has just started can show up as MISSING.
+              print(f"DescribeTasks has no task yet: {response['failures']}")
+              return None
+
+
+          def wait_for_stop(cluster, task_arn, deadline):
+              while time.monotonic() < deadline:
+                  time.sleep(POLL_SECONDS)
+                  task = describe_task(cluster, task_arn)
+                  if task and task["lastStatus"] == "STOPPED":
+                      return task
+              raise TimeoutError(f"Task {task_arn} did not stop in time")
+
+
+          def stop_task(cluster, task_arn):
+              try:
+                  ecs.stop_task(
+                      cluster=cluster, task=task_arn, reason="CloudFormation got no result"
+                  )
+                  print(f"Stopped {task_arn}")
+              except ClientError as exc:
+                  print(f"StopTask failed for {task_arn}: {exc}")
+
+
+          def run(props, deadline):
+              task_arn = start_task(props, deadline)
+              print(f"Started {task_arn}")
+              # Never leave a task running once this resource reports FAILED.
+              try:
+                  task = wait_for_stop(props["Cluster"], task_arn, deadline)
+              except Exception:
+                  stop_task(props["Cluster"], task_arn)
+                  raise
+              codes = {c["name"]: c.get("exitCode") for c in task["containers"]}
+              print(f"Stopped {task_arn}: exit codes {codes}")
+              if any(code != 0 for code in codes.values()):
+                  raise RuntimeError(
+                      f"Task {task_arn.rsplit('/', 1)[-1]} exit codes {codes}, "
+                      f"reason: {task.get('stoppedReason', 'none')}"
+                  )
+              return task_arn
+
+
+          def handler(event, context):
+              physical_id = event.get("PhysicalResourceId", event["LogicalResourceId"])
+              if event["RequestType"] == "Delete":
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physical_id)
+                  return
+              deadline = (
+                  time.monotonic()
+                  + context.get_remaining_time_in_millis() / 1000
+                  - MARGIN_SECONDS
+              )
+              try:
+                  task_arn = run(event["ResourceProperties"], deadline)
+              except Exception as exc:
+                  print(f"{event['RequestType']} failed: {exc}")
+                  cfnresponse.send(
+                      event, context, cfnresponse.FAILED, {}, physical_id,
+                      reason=str(exc)[:1000],
+                  )
+                  return
+              cfnresponse.send(
+                  event, context, cfnresponse.SUCCESS, {"TaskArn": task_arn}, physical_id
+              )
+
+  # ---------------------------------------------------------------------------
+  # Master password reset, for a restored database only. A restore keeps the
+  # snapshot's master password, and the earlier stack's secret is gone, so
+  # db-init could not sign in. On Create and Update the function sets the
+  # master password to the value in DbMasterSecret and waits until RDS has
+  # applied it. Delete does nothing. The function never logs the value.
+  # ---------------------------------------------------------------------------
+  DbMasterResetLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: RestoreDatabase
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-db-master-reset'
+      RetentionInDays: !Ref LogRetentionDays
+
+  DbMasterResetRole:
+    Type: AWS::IAM::Role
+    Condition: RestoreDatabase
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ResetMasterPassword
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds:ModifyDBInstance
+                  - rds:DescribeDBInstances
+                Resource: !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:${Database}'
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref DbMasterSecret
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !If [CreateDataKey, !GetAtt DataKey.Arn, !Ref ExistingDataKeyArn]
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt DbMasterResetLogGroup.Arn
+
+  DbMasterResetFunction:
+    Type: AWS::Lambda::Function
+    Condition: RestoreDatabase
+    DependsOn: DbMasterResetLogGroup
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-db-master-reset'
+      Runtime: python3.13
+      Handler: index.handler
+      Role: !GetAtt DbMasterResetRole.Arn
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import json
+          import time
+
+          import boto3
+          import cfnresponse
+          from botocore.exceptions import ClientError
+
+          rds = boto3.client("rds")
+          secrets = boto3.client("secretsmanager")
+          POLL_SECONDS = 15
+          # Time kept back to report before Lambda times out.
+          MARGIN_SECONDS = 30
+
+
+          def read_password(secret_arn):
+              value = secrets.get_secret_value(SecretId=secret_arn)["SecretString"]
+              return json.loads(value)["password"]
+
+
+          def request_reset(instance, password, deadline):
+              """Ask RDS for the new password, retrying while the instance is busy."""
+              while True:
+                  try:
+                      rds.modify_db_instance(
+                          DBInstanceIdentifier=instance,
+                          MasterUserPassword=password,
+                          ApplyImmediately=True,
+                      )
+                      return
+                  except ClientError as exc:
+                      code = exc.response["Error"]["Code"]
+                      if code != "InvalidDBInstanceState" or time.monotonic() > deadline:
+                          raise
+                      print(f"{instance} cannot change yet, retrying: {code}")
+                      time.sleep(POLL_SECONDS)
+
+
+          def wait_until_applied(instance, deadline):
+              while time.monotonic() < deadline:
+                  time.sleep(POLL_SECONDS)
+                  db = rds.describe_db_instances(DBInstanceIdentifier=instance)
+                  db = db["DBInstances"][0]
+                  status = db["DBInstanceStatus"]
+                  pending = sorted(db.get("PendingModifiedValues", {}))
+                  print(f"{instance} status {status}, pending {pending}")
+                  if status == "available" and "MasterUserPassword" not in pending:
+                      return
+              raise TimeoutError(f"{instance} did not apply the new password in time")
+
+
+          def handler(event, context):
+              physical_id = event.get("PhysicalResourceId", event["LogicalResourceId"])
+              if event["RequestType"] == "Delete":
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physical_id)
+                  return
+              props = event["ResourceProperties"]
+              instance = props["DBInstanceIdentifier"]
+              deadline = (
+                  time.monotonic()
+                  + context.get_remaining_time_in_millis() / 1000
+                  - MARGIN_SECONDS
+              )
+              try:
+                  password = read_password(props["SecretArn"])
+                  request_reset(instance, password, deadline)
+                  wait_until_applied(instance, deadline)
+              except Exception as exc:
+                  print(f"{event['RequestType']} failed: {exc}")
+                  cfnresponse.send(
+                      event, context, cfnresponse.FAILED, {}, physical_id,
+                      reason=str(exc)[:1000],
+                  )
+                  return
+              print(f"{instance} has the master password from the secret")
+              cfnresponse.send(
+                  event, context, cfnresponse.SUCCESS, {"Done": instance}, physical_id
+              )
+
+  DbMasterReset:
+    Type: Custom::DbMasterPasswordReset
+    Condition: RestoreDatabase
+    DependsOn: DbMasterSecretAttachment
+    Properties:
+      ServiceToken: !GetAtt DbMasterResetFunction.Arn
+      ServiceTimeout: 900
+      DBInstanceIdentifier: !Ref Database
+      SecretArn: !Ref DbMasterSecret
+
+  # ---------------------------------------------------------------------------
+  # db-init. Creates the four databases and their logins from the RDS master
+  # login. Safe to run again: existing roles and databases are kept, and each
+  # password is reset to the value in its secret. It ends by connecting as
+  # each login, so a pass proves every login works.
+  # ---------------------------------------------------------------------------
+  DbInitTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${AWS::StackName}-db-init'
+      RequiresCompatibilities:
+        - EC2
+      NetworkMode: awsvpc
+      Cpu: '256'
+      Memory: '256'
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      Volumes:
+        - Name: rds-ca
+          Host:
+            SourcePath: /opt/hume/config/rds/global-bundle.pem
+      ContainerDefinitions:
+        - Name: db-init
+          Image: postgres:17-alpine
+          Essential: true
+          VersionConsistency: disabled
+          User: '1001:1001'
+          Environment:
+            - Name: PGHOST
+              Value: !GetAtt Database.Endpoint.Address
+            - Name: PGPORT
+              Value: !GetAtt Database.Endpoint.Port
+            - Name: PGSSLMODE
+              Value: verify-full
+            - Name: PGSSLROOTCERT
+              Value: /opt/hume-rds-ca.pem
+            - Name: PGCONNECT_TIMEOUT
+              Value: '10'
+          MountPoints:
+            - SourceVolume: rds-ca
+              ContainerPath: /opt/hume-rds-ca.pem
+              ReadOnly: true
+          Secrets:
+            - Name: PGUSER
+              ValueFrom: !Sub '${DbMasterSecret}:username::'
+            - Name: PGPASSWORD
+              ValueFrom: !Sub '${DbMasterSecret}:password::'
+            - Name: API_DB_USER
+              ValueFrom: !Sub '${ApiDbSecret}:username::'
+            - Name: API_DB_PASSWORD
+              ValueFrom: !Sub '${ApiDbSecret}:password::'
+            - Name: ORCHESTRA_DB_USER
+              ValueFrom: !Sub '${OrchestraDbSecret}:username::'
+            - Name: ORCHESTRA_DB_PASSWORD
+              ValueFrom: !Sub '${OrchestraDbSecret}:password::'
+            - Name: EVENTSTORE_DB_USER
+              ValueFrom: !Sub '${EventstoreDbSecret}:username::'
+            - Name: EVENTSTORE_DB_PASSWORD
+              ValueFrom: !Sub '${EventstoreDbSecret}:password::'
+            - Name: MEDIA_DB_USER
+              ValueFrom: !Sub '${MediaDbSecret}:username::'
+            - Name: MEDIA_DB_PASSWORD
+              ValueFrom: !Sub '${MediaDbSecret}:password::'
+          # Values reach psql through environment variables and \getenv, never
+          # through the command line.
+          Command:
+            - sh
+            - -c
+            - |
+              set -eu
+              init_database() {
+                DB_NAME="$1" DB_USER="$2" DB_PASSWORD="$3" psql -X -q -v ON_ERROR_STOP=1 --dbname=postgres <<'SQL'
+              \getenv db_name DB_NAME
+              \getenv db_user DB_USER
+              \getenv db_password DB_PASSWORD
+              SELECT format('CREATE ROLE %I', :'db_user')
+                WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'db_user') \gexec
+              SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'db_user', :'db_password') \gexec
+              -- PostgreSQL 16 and later: CREATE DATABASE ... OWNER needs SET ROLE rights.
+              GRANT :"db_user" TO CURRENT_USER;
+              SELECT format('CREATE DATABASE %I OWNER %I', :'db_name', :'db_user')
+                WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'db_name') \gexec
+              SQL
+                PGUSER="$2" PGPASSWORD="$3" psql -X -tA -v ON_ERROR_STOP=1 --dbname="$1" \
+                  -c "SELECT 'login ' || current_user || ' connected to ' || current_database()"
+              }
+              init_database hume "$API_DB_USER" "$API_DB_PASSWORD"
+              init_database orchestra "$ORCHESTRA_DB_USER" "$ORCHESTRA_DB_PASSWORD"
+              init_database eventstore "$EVENTSTORE_DB_USER" "$EVENTSTORE_DB_PASSWORD"
+              init_database media "$MEDIA_DB_USER" "$MEDIA_DB_PASSWORD"
+              # The API user needs rds_replication for logical replication.
+              API_DB_USER="$API_DB_USER" psql -X -q -v ON_ERROR_STOP=1 --dbname=postgres <<'SQL'
+              \getenv db_user API_DB_USER
+              GRANT rds_replication TO :"db_user";
+              SQL
+              echo "db-init complete"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref DbInitLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: db-init
+
+  DbInitRun:
+    Type: Custom::EcsRunTask
+    DependsOn:
+      - ClusterCapacityProviderAssociation
+      - InstanceBootComplete
+      - TaskExecutionSecretsPolicy
+      - DbMasterSecretAttachment
+    Properties:
+      ServiceToken: !GetAtt RunTaskFunction.Arn
+      ServiceTimeout: 900
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref DbInitTaskDefinition
+      CapacityProvider: !Ref CapacityProvider
+      Subnets:
+        - !GetAtt Neo4jEeLookup.PrivateSubnet1Id
+      SecurityGroups:
+        - !Ref InstanceSecurityGroup
+      RunId: '1'
+      # A restored database must have its new master password first. The
+      # property only adds that ordering. DependsOn cannot name a resource
+      # that the condition leaves out. Without a restore the property is left
+      # out, so the task does not run again on update.
+      MasterReset: !If [RestoreDatabase, !GetAtt DbMasterReset.Done, !Ref AWS::NoValue]
+
+  # ---------------------------------------------------------------------------
+  # Secrets Manager read access for the ECS agent. One statement covers every
+  # secret in the stack by name prefix, so a new secret under that prefix needs no extra policy.
+  # The licence secret and the truststore secret live outside the stack, and
+  # each is named by its exact ARN. The stack secrets are encrypted with
+  # DataKey, so the role may decrypt with it. The role does not read the Neo4j
+  # app password. Only VaultTaskRole reads it.
+  # ---------------------------------------------------------------------------
+  TaskExecutionSecretsPolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      RoleName: !Ref TaskExecutionRole
+      PolicyName: read-hume-secrets
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:hume/${AWS::StackName}/*'
+              - !Ref HumeLicenceSecretArn
+              - !Ref Neo4jTruststoreSecretArn
+          - Effect: Allow
+            Action: kms:Decrypt
+            Resource: !If [CreateDataKey, !GetAtt DataKey.Arn, !Ref ExistingDataKeyArn]
+
+  # ---------------------------------------------------------------------------
+  # Cloud Map. Each service gets a stable name such as api.hume.local. Tasks in
+  # awsvpc mode register A records with the task private address. The record
+  # health follows the ECS container health check (HealthCheckCustomConfig).
+  # ---------------------------------------------------------------------------
+  ServiceNamespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Name: hume.local
+      Vpc: !GetAtt Neo4jEeLookup.VpcId
+
+  EventstoreDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: eventstore
+      NamespaceId: !GetAtt ServiceNamespace.Id
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  OrchestraDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: orchestra
+      NamespaceId: !GetAtt ServiceNamespace.Id
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  ApiDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: api
+      NamespaceId: !GetAtt ServiceNamespace.Id
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  MediaDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: media
+      NamespaceId: !GetAtt ServiceNamespace.Id
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  # ---------------------------------------------------------------------------
+  # The native administrator password. The allowlist is the outer gate and this
+  # password is the inner one. Punctuation is excluded so the value is safe in
+  # shell commands. Native sign-in only.
+  # ---------------------------------------------------------------------------
+  AdminPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: UseNativeAuth
+    Properties:
+      Name: !Sub 'hume/${AWS::StackName}/admin-password'
+      KmsKeyId: !If [CreateDataKey, !Ref DataKey, !Ref ExistingDataKeyArn]
+      Description: Password of the first native Hume administrator, created by the API at startup.
+      GenerateSecretString:
+        PasswordLength: 24
+        ExcludePunctuation: true
+
+  # ---------------------------------------------------------------------------
+  # Certificate and DNS names. One public ACM certificate for the three host
+  # names, validated by one CNAME per name that CloudFormation writes into the
+  # existing zone. AWS documents that validation is automatic when the domain is
+  # in Route 53, in the same account, and uses DNS validation. The stack stays in
+  # CREATE_IN_PROGRESS on this resource until ACM issues the certificate. The
+  # CloudFormation page gives no timeout, and the ACM page gives a 72 hour
+  # validation window. Each name needs its own DomainValidationOptions
+  # entry with the zone, or its validation record is not created.
+  # ---------------------------------------------------------------------------
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub 'hume.${BaseDomainName}'
+      SubjectAlternativeNames:
+        - !Sub 'hume-api.${BaseDomainName}'
+        - !Sub 'hume-media.${BaseDomainName}'
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Sub 'hume.${BaseDomainName}'
+          HostedZoneId: !Ref HostedZoneId
+        - DomainName: !Sub 'hume-api.${BaseDomainName}'
+          HostedZoneId: !Ref HostedZoneId
+        - DomainName: !Sub 'hume-media.${BaseDomainName}'
+          HostedZoneId: !Ref HostedZoneId
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-alb'
+
+  # One alias record per host. Nothing else in the zone is created or changed.
+  # Route 53 refuses to create a record that already exists, so a clash with
+  # an existing name fails the stack instead of overwriting it.
+  AlbAliasRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub 'hume.${BaseDomainName}'
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt LoadBalancer.DNSName
+        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
+        EvaluateTargetHealth: false
+
+  AlbAliasRecordApi:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub 'hume-api.${BaseDomainName}'
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt LoadBalancer.DNSName
+        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
+        EvaluateTargetHealth: false
+
+  AlbAliasRecordMedia:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub 'hume-media.${BaseDomainName}'
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt LoadBalancer.DNSName
+        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
+        EvaluateTargetHealth: false
+
+  # ---------------------------------------------------------------------------
+  # Application Load Balancer. One HTTPS listener on 443 routes by host name to
+  # web, API and media. Port 80 only redirects to 443. The media host forwards
+  # only the paths that the quickstart nginx allows. Those other paths, and any
+  # other host, get the listener's fixed 403.
+  # The HTTPS policy is the one AWS recommends in its security policy
+  # page: TLS 1.3 and 1.2 only, with a post-quantum key exchange for clients
+  # that support it. The CloudFormation default, ELBSecurityPolicy-2016-08,
+  # still allows TLS 1.0 and 1.1, so the policy is always set explicitly.
+  # For the federal target, switch to ELBSecurityPolicy-TLS13-1-2-Res-FIPS-PQ-2025-09.
+  # The load balancer drops requests with invalid header fields and writes
+  # access logs to an S3 bucket in the same Region. The bucket allows only the
+  # log delivery service, and S3 managed keys are the one encryption type that
+  # ELB log delivery supports. Expiry is a lifecycle rule. The stack deletes
+  # the bucket, so empty it before deleting the stack.
+  # ---------------------------------------------------------------------------
+  AccessLogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-access-logs
+            Status: Enabled
+            ExpirationInDays: !Ref AccessLogExpirationDays
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  AccessLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AccessLogBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt AccessLogBucket.Arn
+              - !Sub '${AccessLogBucket.Arn}/*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': 'false'
+          - Sid: AllowLoadBalancerLogDelivery
+            Effect: Allow
+            Principal:
+              Service: logdelivery.elasticloadbalancing.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub '${AccessLogBucket.Arn}/alb/AWSLogs/${AWS::AccountId}/*'
+            Condition:
+              ArnLike:
+                'aws:SourceArn': !Sub 'arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:loadbalancer/*'
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    # The ALB checks that it can write to the bucket when it turns logging on,
+    # so the policy must exist first.
+    DependsOn: AccessLogBucketPolicy
+    Properties:
+      Type: application
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: 'true'
+        - Key: access_logs.s3.enabled
+          Value: 'true'
+        - Key: access_logs.s3.bucket
+          Value: !Ref AccessLogBucket
+        - Key: access_logs.s3.prefix
+          Value: alb
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+      Subnets:
+        - !GetAtt Neo4jEeLookup.PublicSubnet1Id
+        - !GetAtt Neo4jEeLookup.PublicSubnet2Id
+        - !GetAtt Neo4jEeLookup.PublicSubnet3Id
+
+  WebTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 8081
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !GetAtt Neo4jEeLookup.VpcId
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      # Only a 200 counts. The black box check shows that web answers 200 on /.
+      Matcher:
+        HttpCode: '200'
+      HealthCheckIntervalSeconds: 15
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+
+  ApiTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !GetAtt Neo4jEeLookup.VpcId
+      # Only a 200 counts. The api moves its actuator to the management port
+      # 7001, so the check uses that port. Before the move, the black box check
+      # showed /actuator/health answering 200 on the main port without a token.
+      # A live stack showed the target healthy on 7001 on 2026-11-05.
+      HealthCheckPath: /actuator/health
+      HealthCheckPort: '7001'
+      Matcher:
+        HttpCode: '200'
+      HealthCheckIntervalSeconds: 15
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+
+  MediaTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 8008
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !GetAtt Neo4jEeLookup.VpcId
+      # Only a 200 counts. Media answers 403 on its main port without a token,
+      # so the check uses the management port, which media sets to 7001. The
+      # path answers 200 when media is up. A live stack showed the target
+      # healthy on 7001 on 2026-11-05.
+      HealthCheckPath: /actuator/health
+      HealthCheckPort: '7001'
+      Matcher:
+        HttpCode: '200'
+      HealthCheckIntervalSeconds: 15
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-Res-PQ-2025-09
+      Certificates:
+        - CertificateArn: !Ref Certificate
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: '403'
+            ContentType: text/plain
+            MessageBody: Forbidden
+
+  # The one action keeps the host, path and query, so each host redirects to
+  # itself.
+  HttpRedirectListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: '443'
+            StatusCode: HTTP_301
+
+  # The metrics endpoint answers without a sign in and nothing here scrapes it.
+  # The api now serves it on the management port 7001, which the load balancer
+  # never forwards, so this rule is a second guard that keeps the black box
+  # check deterministic. It comes before the API forward rule.
+  ApiPrometheusBlockRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HttpsListener
+      Priority: 10
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values:
+              - !Sub 'hume-api.${BaseDomainName}'
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - /actuator/prometheus*
+      Actions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: '403'
+            ContentType: text/plain
+            MessageBody: Forbidden
+
+  ApiForwardRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HttpsListener
+      Priority: 20
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values:
+              - !Sub 'hume-api.${BaseDomainName}'
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ApiTargetGroup
+
+  MediaForwardRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HttpsListener
+      Priority: 30
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values:
+              - !Sub 'hume-media.${BaseDomainName}'
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - /v1/download*
+              - /v1/upload*
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref MediaTargetGroup
+
+  WebForwardRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HttpsListener
+      Priority: 40
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values:
+              - !Sub 'hume.${BaseDomainName}'
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref WebTargetGroup
+
+  # ---------------------------------------------------------------------------
+  # Regional WAF. The rate rule blocks an address that sends more requests than
+  # its Limit in five minutes. The common rule set blocks too, and the logging
+  # configuration records every request to a log group, with the name prefix
+  # that WAF requires. The logs show which managed rules matched. The ALB
+  # forwards at most the first 8 KB of a request body to WAF (AWS WAF
+  # documentation, body inspection limit). The common rule set body size rule
+  # can match large media uploads for that reason, and the logs show it.
+  # ---------------------------------------------------------------------------
+  WebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub '${AWS::StackName}-alb'
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub '${AWS::StackName}-alb'
+        SampledRequestsEnabled: true
+      Rules:
+        - Name: rate-limit-per-ip
+          Priority: 0
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: 10000
+              AggregateKeyType: IP
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: rate-limit-per-ip
+            SampledRequestsEnabled: true
+        - Name: aws-common-rules
+          Priority: 1
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+              # The load balancer sends WAF at most 8 KB of a request body, so
+              # this rule would match media uploads. It counts and logs
+              # instead of blocking. Every other rule in the group blocks.
+              RuleActionOverrides:
+                - Name: SizeRestrictions_BODY
+                  ActionToUse:
+                    Count: {}
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: aws-common-rules
+            SampledRequestsEnabled: true
+
+  WebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Ref LoadBalancer
+      WebACLArn: !GetAtt WebAcl.Arn
+
+  # The name must start with aws-waf-logs-, so it sits outside the /hume/
+  # prefix of the other log groups. The ARN is built without the trailing :*
+  # that GetAtt Arn may add, because WAF rejects a destination with it. WAF
+  # adds the log group resource policy itself. The authorization and cookie
+  # headers are redacted, so tokens never reach the log.
+  WebAclLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub 'aws-waf-logs-${AWS::StackName}'
+      RetentionInDays: !Ref LogRetentionDays
+
+  WebAclLogging:
+    Type: AWS::WAFv2::LoggingConfiguration
+    Properties:
+      ResourceArn: !GetAtt WebAcl.Arn
+      LogDestinationConfigs:
+        - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${WebAclLogGroup}'
+      RedactedFields:
+        - SingleHeader:
+            Name: authorization
+        - SingleHeader:
+            Name: cookie
+
+  # ---------------------------------------------------------------------------
+  # Alarms. One topic receives every alarm. The email subscription exists only
+  # when AlarmEmail is set, and its owner must confirm it. A missing metric
+  # does not breach, so a quiet stack stays in OK. Thresholds suit one
+  # instance.
+  # ---------------------------------------------------------------------------
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-alarms'
+
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: UseAlarmEmail
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  WebUnhealthyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: A web target has been unhealthy for three minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt LoadBalancer.LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !GetAtt WebTargetGroup.TargetGroupFullName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  ApiUnhealthyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: An api target has been unhealthy for three minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt LoadBalancer.LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !GetAtt ApiTargetGroup.TargetGroupFullName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  MediaUnhealthyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: A media target has been unhealthy for three minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt LoadBalancer.LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !GetAtt MediaTargetGroup.TargetGroupFullName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  AlbTarget5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Targets returned five or more 5xx responses in five minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_Target_5XX_Count
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt LoadBalancer.LoadBalancerFullName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  AlbElb5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: The load balancer itself returned five or more 5xx responses in five minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_ELB_5XX_Count
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt LoadBalancer.LoadBalancerFullName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  DatabaseCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: RDS CPU has averaged above 80 percent for fifteen minutes.
+      Namespace: AWS/RDS
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  DatabaseFreeStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: RDS free storage is below 2 GiB, a tenth of the 20 GiB volume.
+      Namespace: AWS/RDS
+      MetricName: FreeStorageSpace
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2147483648
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  InstanceStatusAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: The container instance has failed an EC2 status check for two minutes.
+      Namespace: AWS/EC2
+      MetricName: StatusCheckFailed
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref AutoScalingGroup
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  # ---------------------------------------------------------------------------
+  # Task definitions. All use awsvpc, the EC2 launch type, and image version
+  # consistency off, so ECS never contacts a registry to resolve a digest.
+  # Image strings match the AMI exactly. Memory uses soft reservations only,
+  # because a hard limit changes the default JVM heap size. Environment
+  # variable names keep the dots of the Hume settings, as the compose file does.
+  # ---------------------------------------------------------------------------
+  EventstoreTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${AWS::StackName}-eventstore'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - EC2
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      Volumes:
+        - Name: rds-ca
+          Host:
+            SourcePath: /opt/hume/config/rds/global-bundle.pem
+      ContainerDefinitions:
+        - Name: eventstore
+          Image: !Sub 'docker.graphaware.com/hume-core/hume-eventstore:${HumeVersion}'
+          Essential: true
+          VersionConsistency: disabled
+          MemoryReservation: 512
+          PortMappings:
+            - ContainerPort: 8080
+            - ContainerPort: 9090
+          Environment:
+            - Name: spring.datasource.url
+              Value: !Sub 'jdbc:postgresql://${Database.Endpoint.Address}:5432/eventstore?sslmode=verify-full&sslrootcert=/opt/hume-rds-ca.pem'
+            - Name: spring.datasource.username
+              Value: eventstore
+            - Name: management.endpoints.web.exposure.include
+              Value: health,prometheus
+            - Name: management.server.port
+              Value: '7001'
+            # Adds /actuator/health/liveness, which ignores optional parts such
+            # as RabbitMQ that fail on /actuator/health.
+            - Name: management.endpoint.health.probes.enabled
+              Value: 'true'
+            # Observed in the image: application.yml sets eventstore.security
+            # to hume / megaSecretPwd. These two override it.
+            - Name: eventstore.security.username
+              Value: hume
+            # Stops the anonymous Liquibase analytics calls that a local
+            # quickstart showed the event store making at startup.
+            - Name: LIQUIBASE_ANALYTICS_ENABLED
+              Value: 'false'
+          Secrets:
+            - Name: spring.datasource.password
+              ValueFrom: !Sub '${EventstoreDbSecret}:password::'
+            - Name: eventstore.security.password
+              ValueFrom: !Ref EventstorePasswordSecret
+          MountPoints:
+            - SourceVolume: rds-ca
+              ContainerPath: /opt/hume-rds-ca.pem
+              ReadOnly: true
+          HealthCheck:
+            Command:
+              - CMD
+              - curl
+              - -fsS
+              - -o
+              - /dev/null
+              - http://localhost:7001/actuator/health/liveness
+            Interval: 10
+            Timeout: 3
+            Retries: 5
+            StartPeriod: 60
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref EventstoreLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: eventstore
+
+  OrchestraTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${AWS::StackName}-orchestra'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - EC2
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt VaultTaskRole.Arn
+      Volumes:
+        - Name: conf
+          Host:
+            SourcePath: /opt/hume/config/orchestra/conf
+        - Name: security
+          Host:
+            SourcePath: /opt/hume/config/orchestra/security
+        - Name: data
+          EFSVolumeConfiguration:
+            FilesystemId: !If [CreateFileSystem, !Ref DataFileSystem, !Ref ExistingFileSystemId]
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref OrchestraAccessPoint
+              IAM: DISABLED
+        - Name: truststore
+          Host:
+            SourcePath: /opt/hume/truststore/hume-truststore
+        - Name: rds-ca
+          Host:
+            SourcePath: /opt/hume/config/rds/global-bundle.pem
+      ContainerDefinitions:
+        - Name: orchestra
+          Image: !Sub 'docker.graphaware.com/hume-core/hume-orchestra:${HumeVersion}'
+          Essential: true
+          VersionConsistency: disabled
+          MemoryReservation: 768
+          PortMappings:
+            - ContainerPort: 8100
+            - ContainerPort: 8666
+          Environment:
+            # The AWS vault provider resolves vault:aws: references in Hume
+            # resources, with the credentials of VaultTaskRole.
+            - Name: hume.vault.aws.enabled
+              Value: 'true'
+            - Name: hume.vault.aws.region
+              Value: !Ref AWS::Region
+            - Name: spring.datasource.url
+              Value: !Sub 'jdbc:postgresql://${Database.Endpoint.Address}:5432/orchestra?sslmode=verify-full&sslrootcert=/opt/hume-rds-ca.pem'
+            - Name: spring.datasource.username
+              Value: orchestra
+            - Name: orchestra.startup.workflows.autoload
+              Value: 'true'
+            - Name: hume.security.audit.log.path
+              Value: /audit/orchestra
+            - Name: hume.logging.config.location
+              Value: /conf/server-logs-config.xml
+            - Name: management.endpoints.web.exposure.include
+              Value: health,prometheus
+            - Name: management.server.port
+              Value: '7001'
+            # Adds /actuator/health/liveness, which ignores optional parts such
+            # as RabbitMQ that fail on /actuator/health.
+            - Name: management.endpoint.health.probes.enabled
+              Value: 'true'
+            - Name: orchestra.scripting.python.security.enabled
+              Value: 'true'
+            - Name: orchestra.scripting.python.security.config
+              Value: /security/security.json
+          Secrets:
+            - Name: spring.datasource.password
+              ValueFrom: !Sub '${OrchestraDbSecret}:password::'
+            - Name: JAVA_TOOL_OPTIONS
+              ValueFrom: !Sub '${Neo4jTruststoreSecretArn}:java_tool_options::'
+          MountPoints:
+            - SourceVolume: conf
+              ContainerPath: /conf
+              ReadOnly: true
+            - SourceVolume: security
+              ContainerPath: /security
+              ReadOnly: true
+            - SourceVolume: data
+              ContainerPath: /data
+            - SourceVolume: truststore
+              ContainerPath: /opt/hume-truststore
+              ReadOnly: true
+            - SourceVolume: rds-ca
+              ContainerPath: /opt/hume-rds-ca.pem
+              ReadOnly: true
+          HealthCheck:
+            Command:
+              - CMD
+              - curl
+              - -fsS
+              - -o
+              - /dev/null
+              - http://localhost:7001/actuator/health/liveness
+            Interval: 10
+            Timeout: 3
+            Retries: 5
+            StartPeriod: 60
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref OrchestraLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: orchestra
+
+  ApiTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${AWS::StackName}-api'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - EC2
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt VaultTaskRole.Arn
+      Volumes:
+        - Name: conf
+          Host:
+            SourcePath: /opt/hume/config/api/conf
+        - Name: audit
+          EFSVolumeConfiguration:
+            FilesystemId: !If [CreateFileSystem, !Ref DataFileSystem, !Ref ExistingFileSystemId]
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref AuditLogsAccessPoint
+              IAM: DISABLED
+        - Name: rds-ca
+          Host:
+            SourcePath: /opt/hume/config/rds/global-bundle.pem
+        - Name: truststore
+          Host:
+            SourcePath: /opt/hume/truststore/hume-truststore
+      ContainerDefinitions:
+        - Name: api
+          Image: !Sub 'docker.graphaware.com/hume-core/hume-api:${HumeVersion}'
+          Essential: true
+          VersionConsistency: disabled
+          MemoryReservation: 1024
+          PortMappings:
+            - ContainerPort: 8080
+            - ContainerPort: 9080
+          Environment:
+            # The AWS vault provider resolves vault:aws: references in Hume
+            # resources, with the credentials of VaultTaskRole.
+            - Name: hume.vault.aws.enabled
+              Value: 'true'
+            - Name: hume.vault.aws.region
+              Value: !Ref AWS::Region
+            - Name: hume.eventstore.hostname
+              Value: eventstore.hume.local
+            - Name: hume.eventstore.port
+              Value: '9090'
+            - Name: hume.eventstore.username
+              Value: hume
+            - Name: spring.datasource.url
+              Value: !Sub 'jdbc:postgresql://${Database.Endpoint.Address}:5432/hume?sslmode=verify-full&sslrootcert=/opt/hume-rds-ca.pem'
+            - Name: spring.datasource.username
+              Value: hume
+            - Name: hume.orchestra.uri
+              Value: http://orchestra.hume.local:8100
+            # API keys exist only for the Spine demo, whose import signs in
+            # with the initial admin key. Without it, the settings are false.
+            # SSO sign-in and media work with no API key.
+            - Name: hume.api.enabled
+              Value: !If [UseSpineImport, 'true', 'false']
+            - Name: hume.api.initial-key.create
+              Value: !If [UseSpineImport, 'true', 'false']
+            - !If
+              - UseSpineImport
+              - Name: hume.api.initial-key.name
+                Value: admin-api-key
+              - !Ref AWS::NoValue
+            - !If
+              - UseSpineImport
+              - Name: hume.api.initial-key.roles
+                Value: ROLE_ADMINISTRATOR,ROLE_WORKSPACES_MANAGER
+              - !Ref AWS::NoValue
+            - Name: management.endpoints.web.exposure.include
+              Value: health,prometheus
+            - Name: management.server.port
+              Value: '7001'
+            # Adds /actuator/health/liveness, which ignores optional parts such
+            # as RabbitMQ that fail on /actuator/health.
+            - Name: management.endpoint.health.probes.enabled
+              Value: 'true'
+            - Name: hume.security.audit.enabled
+              Value: 'true'
+            - Name: hume.security.audit.log.path
+              Value: /audit/api
+            - Name: hume.media.enabled
+              Value: 'true'
+            - Name: hume.media.uri
+              Value: http://media.hume.local:8008
+            - Name: hume.media.uri-fe
+              Value: !Sub 'https://hume-media.${BaseDomainName}/v1'
+            - Name: hume.eventstore.schema.changes.enabled
+              Value: 'true'
+            - Name: hume.feature.mde.enabled
+              Value: 'false'
+            # OpenID Connect sign-in, with the settings from the Hume generic
+            # OIDC page. They match the ones proven against Amazon Cognito. In
+            # Native the API keeps its default provider.
+            - !If
+              - UseOidc
+              - Name: hume.security.provider
+                Value: oidc
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: hume.security.role-management
+                Value: provider
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: hume.security.oidc.issuer-uri
+                Value: !Ref OidcIssuerUri
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: hume.security.oidc.jwk-set-uri
+                Value: !If
+                  - UseOidcJwkSetUri
+                  - !Ref OidcJwkSetUri
+                  - !Sub '${OidcIssuerUri}/.well-known/jwks.json'
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: hume.security.oidc.client-id
+                Value: !Ref OidcClientId
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: hume.security.oidc.principal-claim
+                Value: !Ref OidcPrincipalClaim
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: hume.security.oidc.roles-claim-paths
+                Value: !Ref OidcRolesClaimPath
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: hume.security.oidc.roles-mappings
+                Value: !Ref OidcRolesMappings
+              - !Ref AWS::NoValue
+            # Native administrator, from the settings in the Hume Helm chart.
+            # These settings create the first administrator at startup. With
+            # Oidc, the provider group grants the administrator role instead.
+            - !If
+              - UseNativeAuth
+              - Name: com.hume.core.admin.setup.step.admin_creation.auto
+                Value: 'true'
+              - !Ref AWS::NoValue
+            - !If
+              - UseNativeAuth
+              - Name: com.hume.core.admin.setup.step.admin_creation.username
+                Value: admin
+              - !Ref AWS::NoValue
+            - !If
+              - UseNativeAuth
+              - Name: com.hume.core.admin.setup.step.admin_creation.name
+                Value: Administrator
+              - !Ref AWS::NoValue
+          Secrets:
+            - Name: hume.eventstore.password
+              ValueFrom: !Ref EventstorePasswordSecret
+            - Name: spring.datasource.password
+              ValueFrom: !Sub '${ApiDbSecret}:password::'
+            - Name: hume.licence.key
+              ValueFrom: !Ref HumeLicenceSecretArn
+            # Service keys. See the comment above MediaDownloadKeySecret.
+            - Name: internal.hume.media.api-key
+              ValueFrom: !Ref ApiToMediaKeySecret
+            - Name: hume.security.api-key
+              ValueFrom: !Ref MediaToApiKeySecret
+            - Name: hume.security.symmetric-key
+              ValueFrom: !Ref SymmetricKeySecret
+            - Name: hume.security.api-key-download.value
+              ValueFrom: !Ref MediaDownloadKeySecret
+            - !If
+              - UseSpineImport
+              - Name: hume.api.initial-key.token
+                ValueFrom: !Ref ApiKeySecret
+              - !Ref AWS::NoValue
+            - Name: JAVA_TOOL_OPTIONS
+              ValueFrom: !Sub '${Neo4jTruststoreSecretArn}:java_tool_options::'
+            - !If
+              - UseNativeAuth
+              - Name: hume.security.native.jwt.key
+                ValueFrom: !Ref JwtKeySecret
+              - !Ref AWS::NoValue
+            - !If
+              - UseNativeAuth
+              - Name: com.hume.core.admin.setup.step.admin_creation.password
+                ValueFrom: !Ref AdminPasswordSecret
+              - !Ref AWS::NoValue
+          MountPoints:
+            - SourceVolume: conf
+              ContainerPath: /conf
+              ReadOnly: true
+            - SourceVolume: audit
+              ContainerPath: /audit
+            - SourceVolume: rds-ca
+              ContainerPath: /opt/hume-rds-ca.pem
+              ReadOnly: true
+            - SourceVolume: truststore
+              ContainerPath: /opt/hume-truststore
+              ReadOnly: true
+          HealthCheck:
+            Command:
+              - CMD
+              - curl
+              - -fsS
+              - -o
+              - /dev/null
+              - http://localhost:7001/actuator/health/liveness
+            Interval: 10
+            Timeout: 3
+            Retries: 10
+            StartPeriod: 90
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api
+
+  MediaTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${AWS::StackName}-media'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - EC2
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      Volumes:
+        - Name: files
+          EFSVolumeConfiguration:
+            FilesystemId: !If [CreateFileSystem, !Ref DataFileSystem, !Ref ExistingFileSystemId]
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref MediaAccessPoint
+              IAM: DISABLED
+        - Name: rds-ca
+          Host:
+            SourcePath: /opt/hume/config/rds/global-bundle.pem
+      ContainerDefinitions:
+        - Name: media
+          Image: !Sub 'docker.graphaware.com/hume-core/hume-media:${HumeVersion}'
+          Essential: true
+          VersionConsistency: disabled
+          MemoryReservation: 512
+          PortMappings:
+            - ContainerPort: 8008
+          Environment:
+            - Name: hume.eventstore.hostname
+              Value: eventstore.hume.local
+            - Name: hume.eventstore.port
+              Value: '9090'
+            - Name: hume.eventstore.username
+              Value: hume
+            - Name: spring.datasource.url
+              Value: !Sub 'jdbc:postgresql://${Database.Endpoint.Address}:5432/media?sslmode=verify-full&sslrootcert=/opt/hume-rds-ca.pem'
+            - Name: spring.datasource.username
+              Value: media
+            - Name: hume.security.provider
+              Value: !If [UseOidc, oidc, native]
+            - !If
+              - UseOidc
+              - Name: hume.security.role-management
+                Value: provider
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: hume.security.oidc.issuer-uri
+                Value: !Ref OidcIssuerUri
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: hume.security.oidc.jwk-set-uri
+                Value: !If
+                  - UseOidcJwkSetUri
+                  - !Ref OidcJwkSetUri
+                  - !Sub '${OidcIssuerUri}/.well-known/jwks.json'
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: hume.security.oidc.client-id
+                Value: !Ref OidcClientId
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: hume.security.oidc.principal-claim
+                Value: !Ref OidcPrincipalClaim
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: hume.security.oidc.roles-claim-paths
+                Value: !Ref OidcRolesClaimPath
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: hume.security.oidc.roles-mappings
+                Value: !Ref OidcRolesMappings
+              - !Ref AWS::NoValue
+            - Name: hume.security.api-key.enabled
+              Value: 'true'
+            - Name: management.endpoints.web.exposure.include
+              Value: health,prometheus
+            - Name: management.server.port
+              Value: '7001'
+            # Adds /actuator/health/liveness, which ignores optional parts such
+            # as RabbitMQ that fail on /actuator/health.
+            - Name: management.endpoint.health.probes.enabled
+              Value: 'true'
+            - Name: hume.security.uri
+              Value: http://api.hume.local:9080
+            - Name: hume.media.upload.initial_file_status
+              Value: READY
+            - Name: hume.media.upload.max-file-size
+              Value: 20000MB
+            - Name: hume.media.upload.max-field-size
+              Value: 10MB
+            - Name: hume.feature.files.enabled
+              Value: 'true'
+            - Name: hume.media.storage.providers.local.enabled
+              Value: 'true'
+            - Name: hume.media.storage.providers.local.path.uploaded
+              Value: /hume-media/ready
+            - Name: hume.media.storage.providers.local.path.ready
+              Value: /hume-media/ready
+            - Name: hume.media.notifications.event-store.enabled
+              Value: 'true'
+          Secrets:
+            - Name: hume.eventstore.password
+              ValueFrom: !Ref EventstorePasswordSecret
+            - Name: spring.datasource.password
+              ValueFrom: !Sub '${MediaDbSecret}:password::'
+            - !If
+              - UseNativeAuth
+              - Name: hume.security.native.jwt.key
+                ValueFrom: !Ref JwtKeySecret
+              - !Ref AWS::NoValue
+            # Service keys. See the comment above MediaDownloadKeySecret.
+            - Name: hume.security.api-key.value
+              ValueFrom: !Ref ApiToMediaKeySecret
+            - Name: hume.security.api-key
+              ValueFrom: !Ref MediaToApiKeySecret
+            - Name: hume.security.symmetric-key
+              ValueFrom: !Ref SymmetricKeySecret
+            - Name: hume.security.api-key-download.value
+              ValueFrom: !Ref MediaDownloadKeySecret
+            - Name: hume.security.api-key-maintenance.value
+              ValueFrom: !Ref MaintenanceKeySecret
+          MountPoints:
+            - SourceVolume: rds-ca
+              ContainerPath: /opt/hume-rds-ca.pem
+              ReadOnly: true
+            # /media exists in the image, owned by root, so Docker cannot
+            # copy it into the EFS access point that runs as 1001. A path the
+            # image lacks is mounted empty.
+            - SourceVolume: files
+              ContainerPath: /hume-media
+          HealthCheck:
+            Command:
+              - CMD
+              - curl
+              - -fsS
+              - -o
+              - /dev/null
+              - http://localhost:7001/actuator/health/liveness
+            Interval: 10
+            Timeout: 3
+            Retries: 5
+            StartPeriod: 60
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref MediaLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: media
+
+  # The browser calls the API and media through their own host names, so the
+  # web task gets those two names. They must be https, because a page served
+  # over HTTPS cannot call an http address. Server to server calls
+  # use Cloud Map names. Nothing in this template makes a server side call to
+  # the public host name.
+  WebTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${AWS::StackName}-web'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - EC2
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: web
+          Image: !Sub 'docker.graphaware.com/hume-core/hume-web:${HumeVersion}'
+          Essential: true
+          VersionConsistency: disabled
+          MemoryReservation: 64
+          PortMappings:
+            - ContainerPort: 8081
+          Environment:
+            - Name: HUME_API_URL
+              Value: !Sub 'https://hume-api.${BaseDomainName}'
+            - Name: HUME_MEDIA_API_URL
+              Value: !Sub 'https://hume-media.${BaseDomainName}/v1'
+            # The browser side of OpenID Connect. The Hume settings table says
+            # OIDC_ISSUER_URL and its examples say OIDC_ISSUER_URI, so both are
+            # set. Cognito's login page refuses to load in a frame, so the
+            # session is restored by a full page redirect.
+            - !If
+              - UseOidc
+              - Name: OIDC_ENABLED
+                Value: 'true'
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: OIDC_ISSUER_URL
+                Value: !Ref OidcIssuerUri
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: OIDC_ISSUER_URI
+                Value: !Ref OidcIssuerUri
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: OIDC_CLIENT_ID
+                Value: !Ref OidcClientId
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: OIDC_SCOPE
+                Value: !Ref OidcScope
+              - !Ref AWS::NoValue
+            - !If
+              - UseOidc
+              - Name: OIDC_SESSION_RESTORATION_METHOD
+                Value: full-page-redirect
+              - !Ref AWS::NoValue
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref WebLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: web
+
+  # ---------------------------------------------------------------------------
+  # The one-time import task. Two containers share a task scoped volume. The
+  # first writes the import files from the task environment, using the
+  # postgres image already baked into the AMI for its shell. The second is
+  # hume-config-cli, which reads them. The files carry literal values, so they
+  # do not depend on the CLI substituting environment variables. Created only when
+  # SpineConfigSecretArn is set, because the Marketplace deploy runs no
+  # configuration import.
+  # The import hands Hume no credential. It writes two Hume secrets, and both
+  # are plain values that the Spine resource needs: spine-neo4j-host holds the
+  # cluster address, and spine-neo4j-sa-user holds the Neo4j user name. The
+  # password stays in Secrets Manager behind a vault reference. The import does
+  # not store ORCHESTRA_MEDIA_DOWNLOAD_KEY. Only the Spine workflow
+  # ccr-records-import reads it, and the deploy helper skips that workflow.
+  # Media keeps its own copy from MediaDownloadKeySecret.
+  # config-cli signs in with the initial admin API key, so API keys are on only
+  # when this task exists. The key appears on the update that sets
+  # SpineConfigSecretArn, not at first boot. The API creates the initial key
+  # when it restarts with initial-key.create set to true.
+  # ---------------------------------------------------------------------------
+  ConfigCliTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Condition: UseSpineImport
+    Properties:
+      Family: !Sub '${AWS::StackName}-config-cli'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - EC2
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      Volumes:
+        - Name: import
+      ContainerDefinitions:
+        - Name: render
+          Image: postgres:17-alpine
+          Essential: false
+          VersionConsistency: disabled
+          MemoryReservation: 16
+          EntryPoint:
+            - sh
+            - -c
+          Command:
+            - |
+              set -eu
+              mkdir -p /config/secrets /config/variables /config/upload-configs
+              cat > /config/manifest.yml <<EOF
+              imports:
+                - ./secrets
+                - ./variables
+                - ./upload-configs
+              removeOtherRoles: false
+              removeOtherResources: false
+              removeOtherPermissionGroups: false
+              roles:
+                - name: ANALYST
+              EOF
+              cat > /config/variables/frontend-uri.yml <<EOF
+              apiVersion: v1
+              kind: ContextVariable
+              metadata:
+                name: hume-frontend-uri
+              spec:
+                scope: INSTANCE
+                key: hume_frontend_uri
+                value: '$FRONTEND_URI'
+              EOF
+              cat > /config/variables/rest-api-uri.yml <<EOF
+              apiVersion: v1
+              kind: ContextVariable
+              metadata:
+                name: hume-rest-api-uri
+              spec:
+                scope: INSTANCE
+                key: hume_rest_api_uri
+                value: '$REST_API_URI'
+              EOF
+              cat > /config/upload-configs/default-upload-config.yml <<EOF
+              apiVersion: v1
+              kind: UploadConfiguration
+              metadata: {}
+              spec:
+                name: "DEFAULT"
+                description: "The default upload configuration"
+              EOF
+          Environment:
+            - Name: FRONTEND_URI
+              Value: !Sub 'https://hume.${BaseDomainName}'
+            - Name: REST_API_URI
+              Value: http://api.hume.local:8080/api/v1
+          MountPoints:
+            - SourceVolume: import
+              ContainerPath: /config
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ConfigCliLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: render
+        # Runs after render and adds the Spine knowledge graph
+        # to the same import. The deploy helper packs the Spine files into the
+        # secret as base64 of a bzip2 tar, because the files are too large for
+        # the template. The ECS agent injects the secret, as it does the other
+        # secrets, so the container needs no AWS access of its own. The files
+        # contain $$NAME markers that Hume resolves from its own secrets, so
+        # nothing here may expand them. The two Hume secrets give the Spine
+        # resource the cluster host and the user name. The password stays in
+        # Secrets Manager. The resource file holds the placeholder
+        # vault:aws:NEO4J_APP_SECRET_NAME, and the script replaces it with a
+        # reference to the neo4j_app secret. The name is the secret ARN without
+        # its prefix and its six-character suffix. The ref line is the one place
+        # that sets the form. Hume reads a bare-string secret through the plain
+        # form vault:aws:<secret-name>. The manual shows
+        # vault:aws:<secret-name>/<key>/<field>, so a name with slashes may be
+        # split at them. The EE stack uses the slash-free name
+        # neo4j-<stack>-app-password, so the plain form works.
+        # The script stops if the placeholder is still there or no reference
+        # was written. The manifest is edited in place.
+        # The analyst perspective lists two actions that call the Spine HTTP
+        # API, which this stack does not create, so the files of those actions
+        # are not packed. The sed line removes their two names from the
+        # perspective, because a perspective that names a missing action may
+        # fail the import.
+        - Name: render-spine
+          Image: postgres:17-alpine
+          Essential: false
+          VersionConsistency: disabled
+          MemoryReservation: 16
+          DependsOn:
+            - ContainerName: render
+              Condition: SUCCESS
+          EntryPoint:
+            - sh
+            - -c
+          Command:
+            - |
+              set -eu
+              mkdir -p /config/spine
+              printf '%s' "$SPINE_CONFIG" | base64 -d | tar -xj -C /config/spine
+              sed -i '/^    - expand-info-about-ccr-imported-phone-numbers$/d;/^    - get-ccr-records-graph$/d' /config/spine/spine-kg/perspectives/analyst-perspective.yml
+              cat > /config/secrets/spine-neo4j-host.yml <<EOF
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: spine-neo4j-host
+              spec:
+                access: []
+                key: SPINE_NEO4J_HOST
+                value: "$SPINE_NEO4J_HOST"
+              EOF
+              cat > /config/secrets/spine-neo4j-sa-user.yml <<EOF
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: spine-neo4j-sa-user
+              spec:
+                access: []
+                key: SPINE_NEO4J_SA_USER
+                value: "$NEO4J_USERNAME"
+              EOF
+              name=$(printf '%s' "$NEO4J_APP_SECRET_ARN" | sed 's/^.*:secret://;s/-[A-Za-z0-9]\{6\}$//')
+              if [ -z "$name" ]; then
+                echo "The neo4j_app secret name is empty" >&2
+                exit 1
+              fi
+              ref="vault:aws:$name"
+              sa=/config/spine/resources/spine-neo4j-sa.yml
+              sed "s|vault:aws:NEO4J_APP_SECRET_NAME|$ref|" "$sa" > "$sa.new"
+              mv "$sa.new" "$sa"
+              if grep -q NEO4J_APP_SECRET_NAME "$sa" || ! grep -qF "$ref" "$sa"; then
+                echo "spine-neo4j-sa.yml has no vault reference" >&2
+                exit 1
+              fi
+              sed -i 's|^  - ./upload-configs$|&\n  - ./spine|' /config/manifest.yml
+              printf '  - name: SPINE_ANALYST\n  - name: SPINE_OFFICER\n' >> /config/manifest.yml
+          Environment:
+            - Name: SPINE_NEO4J_HOST
+              Value: !Sub 'neo4j+s://${Neo4jEeLookup.Neo4jHost}'
+            - Name: NEO4J_USERNAME
+              Value: !GetAtt Neo4jEeLookup.Neo4jUsername
+            - Name: NEO4J_APP_SECRET_ARN
+              Value: !GetAtt Neo4jEeLookup.Neo4jAppPasswordSecretArn
+          Secrets:
+            - Name: SPINE_CONFIG
+              ValueFrom: !Ref SpineConfigSecretArn
+          MountPoints:
+            - SourceVolume: import
+              ContainerPath: /config
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ConfigCliLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: render-spine
+        - Name: config-cli
+          Image: !Sub 'docker.graphaware.com/hume-core/hume-config-cli:${HumeVersion}'
+          Essential: true
+          VersionConsistency: disabled
+          MemoryReservation: 256
+          DependsOn:
+            - ContainerName: render
+              Condition: SUCCESS
+            - ContainerName: render-spine
+              Condition: SUCCESS
+          Environment:
+            - Name: hume.url
+              Value: http://api.hume.local:8080
+            - Name: import.path
+              Value: /config
+            - Name: hume.config.mode
+              Value: import
+          Secrets:
+            - Name: hume.admin.api.key
+              ValueFrom: !Ref ApiKeySecret
+          MountPoints:
+            - SourceVolume: import
+              ContainerPath: /config
+              ReadOnly: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ConfigCliLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: config-cli
+
+  # ---------------------------------------------------------------------------
+  # Services, created in dependency order: eventstore, orchestra, api, media,
+  # web, so each service starts after the ones it connects to. Each service
+  # runs the number of tasks its copy parameter sets, one by default,
+  # and Orchestra always runs one. A service is placed only on instances that
+  # carry the Hume version attribute, and replaces its tasks by stopping first,
+  # because one instance has no room for old and new tasks together. The
+  # circuit breaker makes a crash loop fail the stack instead of waiting for
+  # the default timeout. Rollback is true for every service, so a failed update
+  # returns to the last working task definition.
+  #
+  # Each service also depends on the security group rules the ECS and SSM
+  # agents and the load balancer health checks use. A delete or rollback then
+  # removes the services first, while the instance can still reach ECS and the
+  # health checks still pass, so the tasks stop instead of hanging.
+  # ---------------------------------------------------------------------------
+  EventstoreService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - DbInitRun
+      - InstanceEgressHttps
+      - VpcEndpointIngressFromHume
+      - InstanceEgressSelf
+      - InstanceEgressDatabase
+      - InstanceIngressFromAlbManagementHealth
+      - AlbEgressManagementHealth
+      - InstanceIngressFromAlbWebAndApi
+      - AlbEgressWebAndApi
+    Properties:
+      Cluster: !Ref Cluster
+      ServiceName: eventstore
+      TaskDefinition: !Ref EventstoreTaskDefinition
+      DesiredCount: !Ref EventstoreCopies
+      CapacityProviderStrategy:
+        - CapacityProvider: !Ref CapacityProvider
+          Weight: 1
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      PlacementConstraints:
+        - Type: memberOf
+          Expression: !Sub 'attribute:hume.version == ${HumeVersion}'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !GetAtt Neo4jEeLookup.PrivateSubnet1Id
+          SecurityGroups:
+            - !Ref InstanceSecurityGroup
+      ServiceRegistries:
+        - RegistryArn: !GetAtt EventstoreDiscoveryService.Arn
+
+  OrchestraService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - EventstoreService
+      - DataMountTarget1
+      - DataMountTarget2
+      - InstanceEgressEfs
+      - InstanceEgressHttps
+      - VpcEndpointIngressFromHume
+      - InstanceEgressSelf
+      - InstanceEgressDatabase
+      - InstanceIngressFromAlbManagementHealth
+      - AlbEgressManagementHealth
+      - InstanceIngressFromAlbWebAndApi
+      - AlbEgressWebAndApi
+    Properties:
+      Cluster: !Ref Cluster
+      ServiceName: orchestra
+      TaskDefinition: !Ref OrchestraTaskDefinition
+      # Fixed at one copy on purpose. A second Orchestra needs extra licensing,
+      # so no parameter controls this count.
+      DesiredCount: 1
+      CapacityProviderStrategy:
+        - CapacityProvider: !Ref CapacityProvider
+          Weight: 1
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      PlacementConstraints:
+        - Type: memberOf
+          Expression: !Sub 'attribute:hume.version == ${HumeVersion}'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !GetAtt Neo4jEeLookup.PrivateSubnet1Id
+          SecurityGroups:
+            - !Ref InstanceSecurityGroup
+      ServiceRegistries:
+        - RegistryArn: !GetAtt OrchestraDiscoveryService.Arn
+
+  ApiService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - OrchestraService
+      - ApiForwardRule
+      - DataMountTarget1
+      - DataMountTarget2
+      - InstanceEgressEfs
+      - InstanceEgressHttps
+      - VpcEndpointIngressFromHume
+      - InstanceEgressSelf
+      - InstanceEgressDatabase
+      - InstanceIngressFromAlbManagementHealth
+      - AlbEgressManagementHealth
+      - InstanceIngressFromAlbWebAndApi
+      - AlbEgressWebAndApi
+    Properties:
+      Cluster: !Ref Cluster
+      ServiceName: api
+      TaskDefinition: !Ref ApiTaskDefinition
+      DesiredCount: !Ref ApiCopies
+      CapacityProviderStrategy:
+        - CapacityProvider: !Ref CapacityProvider
+          Weight: 1
+      HealthCheckGracePeriodSeconds: 120
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      PlacementConstraints:
+        - Type: memberOf
+          Expression: !Sub 'attribute:hume.version == ${HumeVersion}'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !GetAtt Neo4jEeLookup.PrivateSubnet1Id
+          SecurityGroups:
+            - !Ref InstanceSecurityGroup
+      LoadBalancers:
+        - ContainerName: api
+          ContainerPort: 8080
+          TargetGroupArn: !Ref ApiTargetGroup
+      ServiceRegistries:
+        - RegistryArn: !GetAtt ApiDiscoveryService.Arn
+
+  MediaService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ApiService
+      - MediaForwardRule
+      - DataMountTarget1
+      - DataMountTarget2
+      - InstanceEgressEfs
+      - InstanceEgressHttps
+      - VpcEndpointIngressFromHume
+      - InstanceEgressSelf
+      - InstanceEgressDatabase
+      - InstanceIngressFromAlbManagementHealth
+      - AlbEgressManagementHealth
+      - InstanceIngressFromAlbWebAndApi
+      - AlbEgressWebAndApi
+    Properties:
+      Cluster: !Ref Cluster
+      ServiceName: media
+      TaskDefinition: !Ref MediaTaskDefinition
+      DesiredCount: !Ref MediaCopies
+      CapacityProviderStrategy:
+        - CapacityProvider: !Ref CapacityProvider
+          Weight: 1
+      HealthCheckGracePeriodSeconds: 90
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      PlacementConstraints:
+        - Type: memberOf
+          Expression: !Sub 'attribute:hume.version == ${HumeVersion}'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !GetAtt Neo4jEeLookup.PrivateSubnet1Id
+          SecurityGroups:
+            - !Ref InstanceSecurityGroup
+      LoadBalancers:
+        - ContainerName: media
+          ContainerPort: 8008
+          TargetGroupArn: !Ref MediaTargetGroup
+      ServiceRegistries:
+        - RegistryArn: !GetAtt MediaDiscoveryService.Arn
+
+  WebService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - MediaService
+      - WebForwardRule
+      - InstanceEgressHttps
+      - VpcEndpointIngressFromHume
+      - InstanceEgressSelf
+      - InstanceEgressDatabase
+      - InstanceIngressFromAlbManagementHealth
+      - AlbEgressManagementHealth
+      - InstanceIngressFromAlbWebAndApi
+      - AlbEgressWebAndApi
+    Properties:
+      Cluster: !Ref Cluster
+      ServiceName: web
+      TaskDefinition: !Ref WebTaskDefinition
+      DesiredCount: !Ref WebCopies
+      CapacityProviderStrategy:
+        - CapacityProvider: !Ref CapacityProvider
+          Weight: 1
+      HealthCheckGracePeriodSeconds: 30
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      PlacementConstraints:
+        - Type: memberOf
+          Expression: !Sub 'attribute:hume.version == ${HumeVersion}'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !GetAtt Neo4jEeLookup.PrivateSubnet1Id
+          SecurityGroups:
+            - !Ref InstanceSecurityGroup
+      LoadBalancers:
+        - ContainerName: web
+          ContainerPort: 8081
+          TargetGroupArn: !Ref WebTargetGroup
+
+  # Runs hume-config-cli once the API, Orchestra and media services are steady.
+  # CloudFormation waits for an ECS service to reach steady state, so the
+  # service resources finishing is the "healthy" signal. The custom resource
+  # type and its properties are the one-time task interface. It also
+  # waits for InstanceBootComplete directly, although the services already do.
+  # Created only when SpineConfigSecretArn is set.
+  ConfigCliRun:
+    Type: Custom::EcsRunTask
+    Condition: UseSpineImport
+    DependsOn:
+      - InstanceBootComplete
+      - ApiService
+      - OrchestraService
+      - MediaService
+    Properties:
+      ServiceToken: !GetAtt RunTaskFunction.Arn
+      ServiceTimeout: 900
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref ConfigCliTaskDefinition
+      CapacityProvider: !Ref CapacityProvider
+      Subnets:
+        - !GetAtt Neo4jEeLookup.PrivateSubnet1Id
+      SecurityGroups:
+        - !Ref InstanceSecurityGroup
+
+Outputs:
+  ClusterName:
+    Value: !Ref Cluster
+
+  EeStackName:
+    Description: The Neo4j EE stack that Hume joins.
+    Value: !Ref EeStackName
+
+  Neo4jHost:
+    Description: The Neo4j host that Orchestra connects to over neo4j+s.
+    Value: !GetAtt Neo4jEeLookup.Neo4jHost
+
+  VpcId:
+    Value: !GetAtt Neo4jEeLookup.VpcId
+
+  InstanceSubnetId:
+    Description: Subnet of the container instance and its tasks.
+    Value: !GetAtt Neo4jEeLookup.PrivateSubnet1Id
+
+  AlbSecurityGroupId:
+    Value: !Ref AlbSecurityGroup
+
+  InstanceSecurityGroupId:
+    Value: !Ref InstanceSecurityGroup
+
+  ConfigCliTaskDefinitionArn:
+    Condition: UseSpineImport
+    Description: The configuration import task.
+    Value: !Ref ConfigCliTaskDefinition
+
+  DatabaseSecurityGroupId:
+    Value: !Ref DatabaseSecurityGroup
+
+  InstanceRoleArn:
+    Value: !GetAtt InstanceRole.Arn
+
+  TaskExecutionRoleArn:
+    Value: !GetAtt TaskExecutionRole.Arn
+
+  AutoScalingGroupName:
+    Value: !Ref AutoScalingGroup
+
+  CapacityProviderName:
+    Value: !Ref CapacityProvider
+
+  DatabaseEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
+
+  DatabaseMasterSecretArn:
+    Value: !Ref DbMasterSecret
+
+  SmokeTestTaskDefinitionArn:
+    Value: !Ref SmokeTestTaskDefinition
+
+  SecretNamePrefix:
+    Description: Every secret in this stack has a name that starts with this prefix.
+    Value: !Sub 'hume/${AWS::StackName}/'
+
+  LicenceSecretArn:
+    Description: Secret that holds the Hume licence key. It lives outside the stack. The Hume service tasks read it.
+    Value: !Ref HumeLicenceSecretArn
+
+  LogGroupPrefix:
+    Value: !Sub '/hume/${AWS::StackName}/'
+
+  DbInitTaskDefinitionArn:
+    Value: !Ref DbInitTaskDefinition
+
+  AlbDnsName:
+    Description: Address of the load balancer.
+    Value: !GetAtt LoadBalancer.DNSName
+
+  WebUrl:
+    Description: Hume web UI.
+    Value: !Sub 'https://hume.${BaseDomainName}'
+
+  ApiUrl:
+    Description: Hume API.
+    Value: !Sub 'https://hume-api.${BaseDomainName}'
+
+  MediaUrl:
+    Description: Hume media, as the browser calls it.
+    Value: !Sub 'https://hume-media.${BaseDomainName}/v1'
+
+  CertificateArn:
+    Description: ACM certificate on the HTTPS listener. It covers the three host names.
+    Value: !Ref Certificate
+
+  AdminUsername:
+    Condition: UseNativeAuth
+    Description: Native administrator user name.
+    Value: admin
+
+  AdminPasswordSecretArn:
+    Condition: UseNativeAuth
+    Description: Secret that holds the administrator password. Read it with the AWS CLI.
+    Value: !Ref AdminPasswordSecret
+
+  WebAclName:
+    Description: WAF web ACL. Its rate rule and its common rule set both block.
+    Value: !Sub '${AWS::StackName}-alb'
+
+  WebAclLogGroupName:
+    Description: Log group that holds the WAF log.
+    Value: !Ref WebAclLogGroup
+
+  AccessLogBucketName:
+    Description: S3 bucket that holds the load balancer access logs, under the prefix alb/.
+    Value: !Ref AccessLogBucket
+
+  FileSystemId:
+    Description: >-
+      EFS file system that holds the Hume data. The stack keeps it when it
+      deletes the stack. A stack that restores from this one passes it as
+      ExistingFileSystemId.
+    Value: !If [CreateFileSystem, !Ref DataFileSystem, !Ref ExistingFileSystemId]
+
+  AlarmTopicArn:
+    Description: SNS topic that receives every alarm.
+    Value: !Ref AlarmTopic
+
+  DataKeyArn:
+    Description: >-
+      Customer managed key for the stack secrets, the database, and the file
+      system. The stack keeps it when it deletes the stack. A stack that
+      restores from this one passes it as ExistingDataKeyArn.
+    Value: !If [CreateDataKey, !GetAtt DataKey.Arn, !Ref ExistingDataKeyArn]

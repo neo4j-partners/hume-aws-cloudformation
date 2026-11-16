@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="20 20 920 470" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title>Where Each Group, Role and Mapping Is Set</title>
+<defs><filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1a1a1a" flood-opacity="0.10"/></filter><marker id="arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="#8A8A8A"/></marker></defs>
+<rect x="34" y="32" width="892" height="456" rx="16" fill="#FFFFFF" stroke="#E7E4DB" filter="url(#sh)"/>
+<text x="44" y="58" fill="#5C6470" font-size="8.5" font-weight="700" text-anchor="start" letter-spacing="0.4">FOUR SETTINGS DECIDE WHAT A PERSON CAN DO, AND EACH ONE CHANGES AT A DIFFERENT TIME</text>
+<line x1="44" y1="64" x2="916" y2="64" stroke="#E7E4DB"/>
+<text x="44" y="86" fill="#5C6470" font-size="8.5" font-weight="700" text-anchor="start" letter-spacing="0.4">SET BY</text>
+<text x="266" y="86" fill="#5C6470" font-size="8.5" font-weight="700" text-anchor="start" letter-spacing="0.4">STORED IN</text>
+<text x="518" y="86" fill="#5C6470" font-size="8.5" font-weight="700" text-anchor="start" letter-spacing="0.4">READ BY</text>
+<text x="760" y="86" fill="#5C6470" font-size="8.5" font-weight="700" text-anchor="start" letter-spacing="0.4">A CHANGE TAKES EFFECT</text>
+<text x="44" y="108" fill="#16233A" font-size="8.5" font-weight="700" text-anchor="start" letter-spacing="0.4">1  COGNITO GROUPS AND USERS</text>
+<rect x="44" y="116" width="190" height="52" rx="8" fill="#FFFFFF" stroke="#DAD7CE"/>
+<text x="56" y="135" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">verify/cognito.py up, sync</text>
+<text x="56" y="150" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">creates the groups, the five users,</text>
+<text x="56" y="162" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">passwords and the pre token Lambda</text>
+<rect x="266" y="116" width="220" height="52" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="278" y="135" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">Cognito user pool</text>
+<text x="278" y="150" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">groups and their members</text>
+<rect x="518" y="116" width="214" height="52" rx="8" fill="#F6E3B4" stroke="#B7791F"/>
+<text x="530" y="135" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">Each new token</text>
+<text x="530" y="150" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">cognito:groups, sub, username,</text>
+<text x="530" y="162" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">aud from the Lambda</text>
+<line x1="236" y1="142.0" x2="262" y2="142.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<line x1="488" y1="142.0" x2="514" y2="142.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="760" y="132" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">At the next sign-in. A token</text>
+<text x="760" y="145" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">keeps the groups it was</text>
+<text x="760" y="158" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">issued with until it expires.</text>
+<text x="44" y="192" fill="#16233A" font-size="8.5" font-weight="700" text-anchor="start" letter-spacing="0.4">2  HUME ROLE MAPPING</text>
+<rect x="44" y="200" width="190" height="52" rx="8" fill="#FFFFFF" stroke="#DAD7CE"/>
+<text x="56" y="219" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">stack/deploy.py</text>
+<text x="56" y="234" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">HUME_OIDC_ROLES_MAPPINGS.</text>
+<text x="56" y="246" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">spine_demo.py step 4 adds Spine pairs</text>
+<rect x="266" y="200" width="220" height="52" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="278" y="219" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">OidcRolesMappings</text>
+<text x="278" y="234" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">Hume stack parameter, group=ROLE</text>
+<text x="278" y="246" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">pairs separated by commas</text>
+<rect x="518" y="200" width="214" height="52" rx="8" fill="#CFEDE8" stroke="#156459"/>
+<text x="530" y="219" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">Hume API and media tasks</text>
+<text x="530" y="234" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">hume.security.oidc.roles-mappings</text>
+<line x1="236" y1="226.0" x2="262" y2="226.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<line x1="488" y1="226.0" x2="514" y2="226.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="760" y="216" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">When the stack update</text>
+<text x="760" y="229" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">replaces the api and media</text>
+<text x="760" y="242" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">tasks.</text>
+<text x="44" y="276" fill="#16233A" font-size="8.5" font-weight="700" text-anchor="start" letter-spacing="0.4">3  NEO4J GROUP MAPPING</text>
+<rect x="44" y="284" width="190" height="52" rx="8" fill="#FFFFFF" stroke="#DAD7CE"/>
+<text x="56" y="303" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">verify/cognito.py env</text>
+<text x="56" y="318" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">writes OIDC_ADMIN_GROUP and</text>
+<text x="56" y="330" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">OIDC_GROUP_ROLE_MAPPING</text>
+<rect x="266" y="284" width="220" height="52" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="278" y="303" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">EE stack parameters</text>
+<text x="278" y="318" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">set by the EE deploy.py from</text>
+<text x="278" y="330" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">neo4j-ee/.env, plus OidcReaderGroup</text>
+<rect x="518" y="284" width="214" height="52" rx="8" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="530" y="303" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">neo4j.conf on each node</text>
+<text x="530" y="318" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">dbms.security.oidc.sso.authorization</text>
+<text x="530" y="330" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">.group_to_role_mapping</text>
+<line x1="236" y1="310.0" x2="262" y2="310.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<line x1="488" y1="310.0" x2="514" y2="310.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="760" y="300" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">When the EE stack update</text>
+<text x="760" y="313" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">restarts the nodes.</text>
+<text x="44" y="360" fill="#16233A" font-size="8.5" font-weight="700" text-anchor="start" letter-spacing="0.4">4  NEO4J ROLES AND NATIVE USERS</text>
+<rect x="44" y="368" width="190" height="52" rx="8" fill="#FFFFFF" stroke="#DAD7CE"/>
+<text x="56" y="387" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">EE bootstrap, seed_nodes.py</text>
+<text x="56" y="402" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">neo4j and neo4j_app at bootstrap.</text>
+<text x="56" y="414" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">roles.cypher adds the Spine roles</text>
+<rect x="266" y="368" width="220" height="52" rx="8" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="278" y="387" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">Neo4j system database</text>
+<text x="278" y="402" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">roles, privileges, native users</text>
+<rect x="518" y="368" width="214" height="52" rx="8" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="530" y="387" fill="#16233A" font-size="11" font-weight="700" text-anchor="start">Neo4j, on every query</text>
+<text x="530" y="402" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">PUBLIC plus the roles mapped</text>
+<text x="530" y="414" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">from the token's groups</text>
+<line x1="236" y1="394.0" x2="262" y2="394.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<line x1="488" y1="394.0" x2="514" y2="394.0" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="760" y="384" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">At once. CREATE ROLE and</text>
+<text x="760" y="397" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">GRANT need no restart.</text>
+<text x="44" y="444" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">Hume and Neo4j read the same cognito:groups claim but keep separate mappings, and each one matches group names exactly.</text>
+<text x="44" y="458" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">A Spine user needs a pair in OidcRolesMappings and a pair in the Neo4j group mapping.</text>
+</svg>

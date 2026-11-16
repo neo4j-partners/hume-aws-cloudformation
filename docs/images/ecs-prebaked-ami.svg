@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="20 20 920 648" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title>How ECS Manages the Pre-Baked EC2 Instance</title>
+<defs><filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1a1a1a" flood-opacity="0.10"/></filter><marker id="arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="#8A8A8A"/></marker></defs>
+<rect x="34" y="32" width="892" height="624" rx="16" fill="#FFFFFF" stroke="#E7E4DB" filter="url(#sh)"/>
+<text x="44" y="58" fill="#5C6470" font-size="8.5" font-weight="700" text-anchor="start" letter-spacing="0.4">1. AWS-MANAGED: THE ECS CONTROL PLANE DECIDES WHAT RUNS, AND CLOUDFORMATION BUILDS IT ALL</text>
+<line x1="44" y1="64" x2="916" y2="64" stroke="#E7E4DB"/>
+<rect x="44" y="72" width="280" height="88" rx="8" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="58" y="94" fill="#16233A" font-size="11.5" font-weight="700" text-anchor="start">ECS cluster</text>
+<text x="58" y="112" fill="#5C6470" font-size="9" font-weight="400" text-anchor="start">Tracks the registered instance</text>
+<text x="58" y="126" fill="#5C6470" font-size="9" font-weight="400" text-anchor="start">Knows its free CPU and memory</text>
+<text x="58" y="140" fill="#5C6470" font-size="9" font-weight="400" text-anchor="start">No charge for the control plane</text>
+<rect x="340" y="72" width="280" height="88" rx="8" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="354" y="94" fill="#16233A" font-size="11.5" font-weight="700" text-anchor="start">ECS services</text>
+<text x="354" y="112" fill="#5C6470" font-size="9" font-weight="400" text-anchor="start">One per Hume service, with a copy count:</text>
+<text x="354" y="126" fill="#5C6470" font-size="9" font-weight="400" text-anchor="start">web, api, orchestra, eventstore, media</text>
+<text x="354" y="140" fill="#5C6470" font-size="9" font-weight="400" text-anchor="start">No Keycloak: sign-in goes to an OIDC provider</text>
+<rect x="636" y="72" width="280" height="88" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="650" y="94" fill="#16233A" font-size="11.5" font-weight="700" text-anchor="start">CloudFormation stack</text>
+<text x="650" y="112" fill="#5C6470" font-size="9" font-weight="400" text-anchor="start">Creates the cluster, capacity provider,</text>
+<text x="650" y="126" fill="#5C6470" font-size="9" font-weight="400" text-anchor="start">Auto Scaling group, services, ALB, IAM roles</text>
+<text x="650" y="140" fill="#5C6470" font-size="9" font-weight="400" text-anchor="start">Sets ECS_CLUSTER on the new instance</text>
+<line x1="480" y1="162" x2="480" y2="256" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="490" y="206" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">Start tasks: web, api, orchestra,</text>
+<text x="490" y="218" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">eventstore, media</text>
+<line x1="110" y1="256" x2="110" y2="164" stroke="#8A8A8A" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+<text x="118" y="206" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">The agent reports its</text>
+<text x="118" y="218" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">free CPU and memory</text>
+<line x1="850" y1="164" x2="850" y2="256" stroke="#8A8A8A" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+<text x="842" y="206" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="end">User data joins the</text>
+<text x="842" y="218" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="end">instance to the cluster</text>
+<rect x="44" y="260" width="872" height="268" rx="12" fill="#FAFAF8" stroke="#DAD7CE"/>
+<text x="60" y="284" fill="#16233A" font-size="11" font-weight="700" text-anchor="start" letter-spacing="0.3">ONE EC2 INSTANCE, IN A PRIVATE SUBNET OF THE NEO4J EE VPC</text>
+<text x="60" y="300" fill="#5C6470" font-size="9" font-weight="400" text-anchor="start">Launched from the Hume AMI for this release by an Auto Scaling group of one (min 1, max 1, desired 1), through an ECS capacity provider</text>
+<rect x="60" y="312" width="840" height="40" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="74" y="328" fill="#16233A" font-size="10.5" font-weight="700" text-anchor="start">ECS agent</text>
+<text x="74" y="343" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">prefer-cached: starts each image from local disk, no registry login at boot. ENI trunking gives each task its own network interface.</text>
+<text x="60" y="372" fill="#5C6470" font-size="8" font-weight="700" text-anchor="start" letter-spacing="0.4">RUNNING CONTAINERS, USING CPU AND MEMORY</text>
+<rect x="60.0" y="380" width="161.6" height="30" rx="6" fill="#CFEDE8" stroke="#156459"/>
+<text x="140.8" y="399" fill="#16233A" font-size="10" font-weight="700" text-anchor="middle">web</text>
+<rect x="229.6" y="380" width="161.6" height="30" rx="6" fill="#CFEDE8" stroke="#156459"/>
+<text x="310.4" y="399" fill="#16233A" font-size="10" font-weight="700" text-anchor="middle">api</text>
+<rect x="399.2" y="380" width="161.6" height="30" rx="6" fill="#CFEDE8" stroke="#156459"/>
+<text x="480.0" y="399" fill="#16233A" font-size="10" font-weight="700" text-anchor="middle">orchestra</text>
+<rect x="568.8" y="380" width="161.6" height="30" rx="6" fill="#CFEDE8" stroke="#156459"/>
+<text x="649.5999999999999" y="399" fill="#16233A" font-size="10" font-weight="700" text-anchor="middle">eventstore</text>
+<rect x="738.4" y="380" width="161.6" height="30" rx="6" fill="#CFEDE8" stroke="#156459"/>
+<text x="819.1999999999999" y="399" fill="#16233A" font-size="10" font-weight="700" text-anchor="middle">media</text>
+<text x="60" y="432" fill="#5C6470" font-size="8" font-weight="700" text-anchor="start" letter-spacing="0.4">IMAGE CACHE ON THE ROOT VOLUME, BAKED INTO THE AMI</text>
+<rect x="60.0" y="440" width="204.0" height="32" rx="6" fill="#CFEDE8" stroke="#156459"/>
+<text x="70.0" y="454" fill="#16233A" font-size="9.5" font-weight="700" text-anchor="start">hume-web</text>
+<text x="70.0" y="466" fill="#5C6470" font-size="8" font-weight="400" text-anchor="start">running</text>
+<rect x="272.0" y="440" width="204.0" height="32" rx="6" fill="#CFEDE8" stroke="#156459"/>
+<text x="282.0" y="454" fill="#16233A" font-size="9.5" font-weight="700" text-anchor="start">hume-api</text>
+<text x="282.0" y="466" fill="#5C6470" font-size="8" font-weight="400" text-anchor="start">running</text>
+<rect x="484.0" y="440" width="204.0" height="32" rx="6" fill="#CFEDE8" stroke="#156459"/>
+<text x="494.0" y="454" fill="#16233A" font-size="9.5" font-weight="700" text-anchor="start">hume-orchestra</text>
+<text x="494.0" y="466" fill="#5C6470" font-size="8" font-weight="400" text-anchor="start">running</text>
+<rect x="696.0" y="440" width="204.0" height="32" rx="6" fill="#CFEDE8" stroke="#156459"/>
+<text x="706.0" y="454" fill="#16233A" font-size="9.5" font-weight="700" text-anchor="start">hume-media</text>
+<text x="706.0" y="466" fill="#5C6470" font-size="8" font-weight="400" text-anchor="start">running</text>
+<rect x="60.0" y="480" width="204.0" height="32" rx="6" fill="#CFEDE8" stroke="#156459"/>
+<text x="70.0" y="494" fill="#16233A" font-size="9.5" font-weight="700" text-anchor="start">hume-eventstore</text>
+<text x="70.0" y="506" fill="#5C6470" font-size="8" font-weight="400" text-anchor="start">running</text>
+<rect x="272.0" y="480" width="204.0" height="32" rx="6" fill="#FFFFFF" stroke="#DAD7CE" stroke-dasharray="4 3"/>
+<text x="282.0" y="494" fill="#16233A" font-size="9.5" font-weight="700" text-anchor="start">hume-config-cli</text>
+<text x="282.0" y="506" fill="#5C6470" font-size="8" font-weight="400" text-anchor="start">one-shot task for the Spine demo only</text>
+<rect x="484.0" y="480" width="204.0" height="32" rx="6" fill="#FFFFFF" stroke="#DAD7CE" stroke-dasharray="4 3"/>
+<text x="494.0" y="494" fill="#16233A" font-size="9.5" font-weight="700" text-anchor="start">postgres:17-alpine</text>
+<text x="494.0" y="506" fill="#5C6470" font-size="8" font-weight="400" text-anchor="start">one-shot tasks: db-init, smoke test</text>
+<rect x="44" y="544" width="872" height="100" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="58" y="566" fill="#5C6470" font-size="8.5" font-weight="700" text-anchor="start" letter-spacing="0.4">WHERE STATE LIVES</text>
+<text x="58" y="582" fill="#16233A" font-size="9.5" font-weight="400" text-anchor="start">Outside the instance: Postgres in RDS, the graph in Neo4j EE, and the secrets in Secrets Manager under a customer-managed KMS key.</text>
+<text x="58" y="597" fill="#16233A" font-size="9.5" font-weight="400" text-anchor="start">On the instance disk: the config files from the AMI and the truststore file, which user data writes at boot from its Secrets Manager secret.</text>
+<text x="58" y="612" fill="#16233A" font-size="9.5" font-weight="400" text-anchor="start">On EFS: the media files, Orchestra's data folder and the API audit log. The file system is encrypted, backed up daily, and kept when the stack is deleted.</text>
+<text x="58" y="627" fill="#16233A" font-size="9.5" font-weight="400" text-anchor="start">If the instance fails, the Auto Scaling group launches a replacement from the AMI and ECS restarts every task there. It rebuilds the truststore and mounts EFS.</text>
+</svg>

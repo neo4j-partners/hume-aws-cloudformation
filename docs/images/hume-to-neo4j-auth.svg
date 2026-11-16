@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="20 20 920 718" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title>Authentication Flows between Hume, Amazon Cognito and Neo4j</title>
+<defs><filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1a1a1a" flood-opacity="0.10"/></filter><marker id="arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="#8A8A8A"/></marker></defs>
+<rect x="34" y="32" width="892" height="694" rx="16" fill="#FFFFFF" stroke="#E7E4DB" filter="url(#sh)"/>
+<text x="44" y="58" fill="#5C6470" font-size="8.5" font-weight="700" text-anchor="start" letter-spacing="0.4">AUTHENTICATION BETWEEN HUME, AMAZON COGNITO AND NEO4J: THREE FLOWS, ONE NEO4J OIDC PROVIDER, ONE PRE TOKEN GENERATION LAMBDA</text>
+<line x1="44" y1="64" x2="916" y2="64" stroke="#E7E4DB"/>
+<rect x="44" y="72" width="872" height="272" rx="12" fill="#FAFAF8" stroke="#DAD7CE"/>
+<text x="56" y="92" fill="#16233A" font-size="11" font-weight="700" text-anchor="start" letter-spacing="0.3">A. HUMAN USER THROUGH HUME (THE NEW SSO PATH)</text>
+<text x="904" y="92" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="end">one Cognito access token travels from the browser to Hume to Neo4j</text>
+<rect x="60" y="106" width="120" height="44" rx="8" fill="#F6E3B4" stroke="#B7791F"/>
+<text x="120.0" y="125" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">User</text>
+<text x="120.0" y="139" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">browser</text>
+<line x1="184" y1="128" x2="270" y2="128" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="274" y="106" width="236" height="44" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="392.0" y="125" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">Amazon Cognito user pool</text>
+<text x="392.0" y="139" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">hume-web app client, authorization code + PKCE</text>
+<line x1="514" y1="128" x2="646" y2="128" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="650" y="106" width="246" height="44" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="773.0" y="125" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">Pre token generation Lambda</text>
+<text x="773.0" y="139" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">adds aud = hume-web client id</text>
+<path d="M392,150 L392,172 L130,172 L130,186" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="384" y="167" fill="#5C6470" font-size="8" font-weight="400" text-anchor="end">access token: aud, username, cognito:groups, 1 h by default</text>
+<rect x="60" y="190" width="140" height="44" rx="8" fill="#CFEDE8" stroke="#156459"/>
+<text x="130.0" y="209" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">Hume Web</text>
+<text x="130.0" y="223" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">signed-in session</text>
+<line x1="204" y1="212" x2="286" y2="212" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="290" y="190" width="215" height="44" rx="8" fill="#CFEDE8" stroke="#156459"/>
+<text x="397.5" y="209" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">Hume API</text>
+<text x="397.5" y="223" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">checks Cognito JWKS, maps groups to Hume roles</text>
+<line x1="509" y1="212" x2="636" y2="212" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="640" y="190" width="100" height="44" rx="8" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="690.0" y="209" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">Internal NLB</text>
+<text x="690.0" y="223" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">TLS, port 7687</text>
+<line x1="744" y1="212" x2="766" y2="212" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="770" y="190" width="146" height="44" rx="8" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="843.0" y="209" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">Neo4j EE</text>
+<text x="843.0" y="223" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">oidc-sso provider</text>
+<circle cx="770" cy="190" r="7" fill="#16233A"/>
+<text x="770" y="193" fill="#FFFFFF" font-size="8.5" font-weight="700" text-anchor="middle">5</text>
+<text x="58" y="256" font-size="8.5"><tspan fill="#16233A" font-weight="700">1</tspan><tspan fill="#5C6470" dx="6">The user signs in to Hume Web through Cognito with the hume-web app client, authorization code flow with PKCE.</tspan></text>
+<text x="58" y="269" font-size="8.5"><tspan fill="#16233A" font-weight="700">2</tspan><tspan fill="#5C6470" dx="6">Cognito runs the pre token generation Lambda, which adds aud = hume-web client id to the access token. The access token also carries username and cognito:groups. Default lifetime 1 hour.</tspan></text>
+<text x="58" y="282" font-size="8.5"><tspan fill="#16233A" font-weight="700">3</tspan><tspan fill="#5C6470" dx="6">Hume Web sends the access token to Hume API as a bearer token. Hume API validates it against the Cognito JWKS and maps cognito:groups to Hume roles.</tspan></text>
+<text x="58" y="295" font-size="8.5"><tspan fill="#16233A" font-weight="700">4</tspan><tspan fill="#5C6470" dx="6">For a knowledge graph backed by a Neo4jSSO resource, Hume forwards the same access token to Neo4j over bolt (neo4j+s, port 7687, through the internal NLB) with the basic scheme, as the password of the user name __keycloak_token.</tspan></text>
+<text x="58" y="308" font-size="8.5"><tspan fill="#16233A" font-weight="700">5</tspan><tspan fill="#5C6470" dx="6">Neo4j validates signature, issuer and audience against its oidc-sso provider, takes username as the principal and maps cognito:groups to Neo4j roles (for example spine-analysts</tspan></text>
+<text x="74" y="321" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">to spine_analyst). The query runs with that user's roles and Neo4j's logs name the real user.</text>
+<rect x="44" y="358" width="872" height="136" rx="12" fill="#FAFAF8" stroke="#DAD7CE"/>
+<text x="56" y="378" fill="#16233A" font-size="11" font-weight="700" text-anchor="start" letter-spacing="0.3">B. HUME BACKGROUND WORK (UNCHANGED SERVICE ACCOUNT)</text>
+<rect x="594" y="366" width="214" height="18" rx="9" fill="#FFFFFF" stroke="#DAD7CE"/>
+<text x="701.0" y="378.5" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="middle">machine identity, Secrets Manager, rotation</text>
+<rect x="816" y="366" width="92" height="18" rx="9" fill="#FFFFFF" stroke="#DAD7CE"/>
+<text x="862.0" y="378.5" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="middle">no user signed in</text>
+<rect x="60" y="392" width="190" height="44" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="155.0" y="411" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">Secrets Manager</text>
+<text x="155.0" y="425" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">neo4j_app password, stack KMS key</text>
+<line x1="346" y1="414" x2="254" y2="414" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="350" y="392" width="250" height="44" rx="8" fill="#CFEDE8" stroke="#156459"/>
+<text x="475.0" y="411" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">API and Orchestra</text>
+<text x="475.0" y="425" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">Hume background work, no user session</text>
+<line x1="604" y1="414" x2="736" y2="414" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="740" y="392" width="176" height="44" rx="8" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="828.0" y="411" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">Neo4j EE</text>
+<text x="828.0" y="425" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">least-privilege user, never admin</text>
+<text x="58" y="458" font-size="8.5"><tspan fill="#16233A" font-weight="700">1</tspan><tspan fill="#5C6470" dx="6">The API and Orchestra resolve the Secrets Manager reference in spine-neo4j-sa when a resource is used.</tspan></text>
+<text x="74" y="471" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">The form of the reference is still being confirmed.</text>
+<text x="58" y="484" font-size="8.5"><tspan fill="#16233A" font-weight="700">2</tspan><tspan fill="#5C6470" dx="6">They connect to Neo4j with native authentication as neo4j_app, a least-privilege user that holds only the roles the work needs (for Spine, spine_neo4j_sa_rw), never admin.</tspan></text>
+<rect x="44" y="508" width="872" height="154" rx="12" fill="#FAFAF8" stroke="#DAD7CE"/>
+<text x="56" y="528" fill="#16233A" font-size="11" font-weight="700" text-anchor="start" letter-spacing="0.3">C. OPERATOR IN NEO4J BROWSER (SAME NEO4J PROVIDER)</text>
+<path d="M125,552 L125,540 L851,540 L851,548" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="836" y="536" fill="#5C6470" font-size="8" font-weight="400" text-anchor="end">access token as the password of __keycloak_token over bolt, neo4j+s 7687</text>
+<rect x="60" y="552" width="130" height="44" rx="8" fill="#F6E3B4" stroke="#B7791F"/>
+<text x="125.0" y="571" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">Operator</text>
+<text x="125.0" y="585" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">in Neo4j Browser</text>
+<line x1="194" y1="574" x2="280" y2="574" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="284" y="552" width="200" height="44" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="384.0" y="571" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">Amazon Cognito user pool</text>
+<text x="384.0" y="585" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">neo4j app client</text>
+<line x1="488" y1="574" x2="610" y2="574" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="614" y="552" width="150" height="44" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="689.0" y="571" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">Same Lambda</text>
+<text x="689.0" y="585" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">adds aud = neo4j client id</text>
+<rect x="786" y="552" width="130" height="44" rx="8" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="851.0" y="571" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">Neo4j EE</text>
+<text x="851.0" y="585" fill="#5C6470" font-size="8" font-weight="400" text-anchor="middle">same oidc-sso provider</text>
+<circle cx="786" cy="552" r="7" fill="#16233A"/>
+<text x="786" y="555" fill="#FFFFFF" font-size="8.5" font-weight="700" text-anchor="middle">3</text>
+<text x="58" y="618" font-size="8.5"><tspan fill="#16233A" font-weight="700">1</tspan><tspan fill="#5C6470" dx="6">Neo4j Browser signs in through Cognito with the neo4j app client, PKCE.</tspan></text>
+<text x="58" y="631" font-size="8.5"><tspan fill="#16233A" font-weight="700">2</tspan><tspan fill="#5C6470" dx="6">The same Lambda adds aud = neo4j client id. Neo4j's audience list holds both client ids, hume-web and neo4j.</tspan></text>
+<text x="58" y="644" font-size="8.5"><tspan fill="#16233A" font-weight="700">3</tspan><tspan fill="#5C6470" dx="6">Neo4j maps neo4j-admins to admin and any reader group to reader.</tspan></text>
+<rect x="44" y="678" width="9" height="9" rx="2" fill="#CFEDE8" stroke="#156459"/>
+<text x="58" y="686" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">Hume</text>
+<rect x="96.8" y="678" width="9" height="9" rx="2" fill="#DEEAF6" stroke="#1F4E86"/>
+<text x="110.8" y="686" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">Neo4j</text>
+<rect x="154.8" y="678" width="9" height="9" rx="2" fill="#F1F1EE" stroke="#DAD7CE"/>
+<text x="168.8" y="686" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">AWS service</text>
+<rect x="244.0" y="678" width="9" height="9" rx="2" fill="#F6E3B4" stroke="#B7791F"/>
+<text x="258.0" y="686" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">Person</text>
+<line x1="307.2" y1="682.5" x2="329.2" y2="682.5" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="335.2" y="686" fill="#16233A" font-size="9" font-weight="400" text-anchor="start">token or credential flow</text>
+<text x="44" y="704" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">The pre token generation Lambda is only needed for Cognito: other OIDC providers put aud in access tokens by default.</text>
+<text x="44" y="718" fill="#5C6470" font-size="8.5" font-weight="400" text-anchor="start">A user whose groups map to no Neo4j role can sign in but sees an empty graph.</text>
+<text x="227" y="120" font-size="8" text-anchor="middle"><tspan fill="#16233A" font-weight="700">1</tspan><tspan fill="#5C6470" dx="4">sign in, PKCE</tspan></text>
+<text x="580" y="120" font-size="8" text-anchor="middle"><tspan fill="#16233A" font-weight="700">2</tspan><tspan fill="#5C6470" dx="4">pre token generation</tspan></text>
+<text x="245" y="204" font-size="8" text-anchor="middle"><tspan fill="#16233A" font-weight="700">3</tspan><tspan fill="#5C6470" dx="4">bearer token</tspan></text>
+<text x="572" y="204" font-size="8" text-anchor="middle"><tspan fill="#16233A" font-weight="700">4</tspan><tspan fill="#5C6470" dx="4">same token, bolt neo4j+s</tspan></text>
+<text x="300" y="406" font-size="8" text-anchor="middle"><tspan fill="#16233A" font-weight="700">1</tspan><tspan fill="#5C6470" dx="4">reads password</tspan></text>
+<text x="670" y="406" font-size="8" text-anchor="middle"><tspan fill="#16233A" font-weight="700">2</tspan><tspan fill="#5C6470" dx="4">native auth as neo4j_app</tspan></text>
+<text x="237" y="566" font-size="8" text-anchor="middle"><tspan fill="#16233A" font-weight="700">1</tspan><tspan fill="#5C6470" dx="4">sign in, PKCE</tspan></text>
+<text x="549" y="566" font-size="8" text-anchor="middle"><tspan fill="#16233A" font-weight="700">2</tspan><tspan fill="#5C6470" dx="4">pre token generation</tspan></text>
+</svg>

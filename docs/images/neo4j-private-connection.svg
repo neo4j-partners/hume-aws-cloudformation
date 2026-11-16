@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="26 18 908 352" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+  <title>Private Connection from Hume to Neo4j EE</title>
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1a1a1a" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrowGray" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#8A8A8A"/>
+    </marker>
+  </defs>
+
+  <!-- White card -->
+  <rect x="40" y="32" width="880" height="324" rx="16" fill="#FFFFFF" stroke="#E7E4DB" filter="url(#sh)"/>
+
+  <text x="64" y="63" fill="#5C6470" font-size="8.5" font-weight="700" letter-spacing="0.4">PRIVATE CONNECTION: NEO4J EE IS DEPLOYED FIRST, THEN HUME DEPLOYS INTO THE SAME VPC AND CONNECTS TO IT</text>
+  <line x1="64" y1="68" x2="894" y2="68" stroke="#E7E4DB" stroke-width="1"/>
+
+  <!-- ============ HUME IN THE VPC WHERE NEO4J EE RUNS ============ -->
+  <rect x="64" y="80" width="832" height="196" rx="12" fill="#FAFAF8" stroke="#DAD7CE"/>
+  <text x="76" y="100" fill="#16233A" font-size="11" font-weight="700" letter-spacing="0.3">HUME IN THE VPC WHERE NEO4J EE RUNS</text>
+  <text x="884" y="100" fill="#5C6470" font-size="8.5" text-anchor="end">Order: Neo4j EE stack, then the Hume stack with EeStackName</text>
+
+  <!-- Row A: during create and update -->
+  <text x="88" y="118" fill="#5C6470" font-size="8" font-weight="700" letter-spacing="0.4">DURING CREATE AND UPDATE, INSIDE THE HUME STACK. THE OPERATOR PASSES ONLY EESTACKNAME.</text>
+
+  <!-- SSM parameters (AWS) -->
+  <rect x="92" y="124" width="160" height="44" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <text x="172" y="143" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">SSM parameters</text>
+  <text x="172" y="157" fill="#5C6470" font-size="8" text-anchor="middle">/neo4j-ee/&lt;stack&gt;/, from the Neo4j stack</text>
+
+  <line x1="256" y1="146" x2="326" y2="146" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrowGray)"/>
+  <text x="291" y="139" fill="#5C6470" font-size="8" text-anchor="middle">reads them</text>
+
+  <!-- Neo4jEeLookup (Hume) -->
+  <rect x="330" y="124" width="200" height="44" rx="8" fill="#1E8C7E" stroke="#156459"/>
+  <text x="430" y="143" fill="#FFFFFF" font-size="11" font-weight="700" text-anchor="middle">Neo4jEeLookup</text>
+  <text x="430" y="157" fill="#CFEDE8" font-size="8" text-anchor="middle">Lambda custom resource, GetParameters only</text>
+
+  <line x1="534" y1="146" x2="604" y2="146" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrowGray)"/>
+  <text x="569" y="139" fill="#5C6470" font-size="8" text-anchor="middle">returns</text>
+
+  <!-- Hume resources (AWS) -->
+  <rect x="608" y="124" width="262" height="44" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <text x="739" y="143" fill="#16233A" font-size="11" font-weight="700" text-anchor="middle">Hume resources</text>
+  <text x="739" y="157" fill="#5C6470" font-size="8" text-anchor="middle">Neo4jHost, VpcId, subnets, security groups, secret ARNs</text>
+
+  <!-- Row B: the VPC -->
+  <rect x="76" y="180" width="808" height="86" rx="8" fill="none" stroke="#8A8A8A" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="88" y="194" fill="#5C6470" font-size="8.5">VPC created by the Neo4j EE Private template with 3 nodes, with its own NAT gateways and VPC endpoints. Hume joins it.</text>
+
+  <!-- Hume services (Hume) -->
+  <rect x="92" y="204" width="200" height="44" rx="8" fill="#1E8C7E" stroke="#156459"/>
+  <text x="192" y="223" fill="#FFFFFF" font-size="11" font-weight="700" text-anchor="middle">Hume services</text>
+  <text x="192" y="237" fill="#CFEDE8" font-size="8" text-anchor="middle">ECS on EC2, truststore from the trust anchor</text>
+
+  <line x1="296" y1="226" x2="376" y2="226" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrowGray)"/>
+  <text x="336" y="219" fill="#2E6DB4" font-size="8" font-weight="700" text-anchor="middle">neo4j+s, Bolt 7687</text>
+
+  <!-- Internal NLB (Neo4j) -->
+  <rect x="380" y="204" width="140" height="44" rx="8" fill="#2E6DB4" stroke="#1F4E86"/>
+  <text x="450" y="223" fill="#FFFFFF" font-size="11" font-weight="700" text-anchor="middle">Internal NLB</text>
+  <text x="450" y="237" fill="#DEEAF6" font-size="8" text-anchor="middle">part of Neo4j EE, TLS</text>
+
+  <line x1="524" y1="226" x2="552" y2="226" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrowGray)"/>
+
+  <!-- Neo4j EE cluster (Neo4j) -->
+  <rect x="556" y="204" width="140" height="44" rx="8" fill="#2E6DB4" stroke="#1F4E86"/>
+  <text x="626" y="223" fill="#FFFFFF" font-size="11" font-weight="700" text-anchor="middle">Neo4j EE cluster</text>
+  <text x="626" y="237" fill="#DEEAF6" font-size="8" text-anchor="middle">3 nodes, one per zone</text>
+
+  <!-- VPC endpoints and NAT gateways (AWS, Neo4j EE stack) -->
+  <rect x="716" y="204" width="154" height="44" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <text x="793" y="219" fill="#16233A" font-size="10" font-weight="700" text-anchor="middle">Endpoints, NAT gateways</text>
+  <text x="793" y="231" fill="#5C6470" font-size="8" text-anchor="middle">of the Neo4j EE stack</text>
+  <text x="793" y="242" fill="#5C6470" font-size="8" text-anchor="middle">SSM, Secrets Manager, outbound</text>
+
+  <!-- ============ NOTES ============ -->
+  <text x="64" y="298" fill="#5C6470" font-size="8.5">Hume's security group allows outbound 7687 to the NLB security group. The Hume stack adds one inbound 7687 rule to that group.</text>
+  <text x="64" y="312" fill="#5C6470" font-size="8.5">deploy.py builds a truststore from the trust anchor and stores it as a secret. The instance writes it to disk at boot, and Orchestra trusts the NLB with it.</text>
+  <text x="64" y="326" fill="#5C6470" font-size="8.5">The instance uses the Neo4j EE stack's VPC endpoints for SSM and Secrets Manager, and its NAT gateways for the ECS agent and the OIDC provider.</text>
+
+  <!-- ============ LEGEND ============ -->
+  <rect x="64" y="336" width="9" height="9" rx="2" fill="#1E8C7E"/>
+  <text x="78" y="344" fill="#16233A" font-size="9">Hume</text>
+  <rect x="120" y="336" width="9" height="9" rx="2" fill="#2E6DB4"/>
+  <text x="134" y="344" fill="#16233A" font-size="9">Neo4j</text>
+  <rect x="176" y="336" width="9" height="9" rx="2" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <text x="190" y="344" fill="#16233A" font-size="9">AWS service or network</text>
+  <rect x="306" y="336" width="16" height="9" rx="2" fill="none" stroke="#8A8A8A" stroke-dasharray="3 2"/>
+  <text x="327" y="344" fill="#16233A" font-size="9">VPC</text>
+</svg>

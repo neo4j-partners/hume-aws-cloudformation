@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="26 18 908 664" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif">
+  <title>Hume on AWS architecture</title>
+  <defs>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1a1a1a" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#8A8A8A"/>
+    </marker>
+  </defs>
+
+  <!-- White card -->
+  <rect x="40" y="32" width="880" height="636" rx="16" fill="#FFFFFF" stroke="#E7E4DB" filter="url(#sh)"/>
+
+  <text x="56" y="60" fill="#5C6470" font-size="8.5" font-weight="700" letter-spacing="0.4">HUME ON AWS: THIS TEMPLATE DEPLOYS HUME INTO AN EXISTING NEO4J EE STACK</text>
+  <line x1="56" y1="66" x2="904" y2="66" stroke="#E7E4DB" stroke-width="1"/>
+
+  <!-- ============ ENTRY, OUTSIDE THE VPC ============ -->
+  <rect x="56" y="96" width="164" height="44" rx="8" fill="#FFFFFF" stroke="#DAD7CE"/>
+  <text x="70" y="115" fill="#16233A" font-size="11" font-weight="700">Users</text>
+  <text x="70" y="129" fill="#5C6470" font-size="9">Browser, from an allowed address</text>
+
+  <line x1="138" y1="140" x2="138" y2="162" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <rect x="56" y="166" width="164" height="58" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <text x="70" y="187" fill="#16233A" font-size="11" font-weight="700">Route 53 host name</text>
+  <text x="70" y="202" fill="#5C6470" font-size="9">Alias record to the ALB</text>
+  <text x="70" y="215" fill="#5C6470" font-size="9">In your hosted zone</text>
+
+
+  <!-- Deploy order -->
+  <rect x="56" y="250" width="164" height="112" rx="12" fill="#FAFAF8" stroke="#DAD7CE"/>
+  <text x="70" y="270" fill="#5C6470" font-size="8.5" font-weight="700" letter-spacing="0.4">DEPLOY ORDER</text>
+  <text x="70" y="288" fill="#5C6470" font-size="8.5"><tspan fill="#16233A" font-weight="700">1. Prerequisite:</tspan> Neo4j EE</text>
+  <text x="70" y="300" fill="#5C6470" font-size="8.5">stack, NumberOfServers 3,</text>
+  <text x="70" y="312" fill="#5C6470" font-size="8.5">from its own listing.</text>
+  <text x="70" y="330" fill="#5C6470" font-size="8.5"><tspan fill="#156459" font-weight="700">2. This template:</tspan> Hume</text>
+  <text x="70" y="342" fill="#5C6470" font-size="8.5">stack. Enter the EE stack</text>
+  <text x="70" y="354" fill="#5C6470" font-size="8.5">name as EeStackName.</text>
+
+  <!-- ============ VPC ============ -->
+  <rect x="232" y="80" width="672" height="436" rx="10" fill="none" stroke="#8A8A8A" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="244" y="97" fill="#5C6470" font-size="8.5">The existing Neo4j EE stack owns this VPC. The Hume stack adds its resources to it.</text>
+  <text x="244" y="111" fill="#5C6470" font-size="8.5">The ALB uses its public subnets, the services a private subnet.</text>
+
+  <!-- ============ HUME STACK ============ -->
+  <rect x="244" y="122" width="350" height="360" rx="12" fill="#FAFAF8" stroke="#1E8C7E" stroke-width="2"/>
+  <text x="258" y="142" fill="#16233A" font-size="11" font-weight="700" letter-spacing="0.3">HUME STACK</text>
+  <rect x="438" y="130" width="142" height="15" rx="7.5" fill="#1E8C7E"/>
+  <text x="509" y="140.5" fill="#FFFFFF" font-size="8" font-weight="700" letter-spacing="0.4" text-anchor="middle">CREATED BY THIS TEMPLATE</text>
+
+  <!-- WAF and ALB (AWS) -->
+  <rect x="258" y="154" width="322" height="82" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <text x="272" y="176" fill="#16233A" font-size="11" font-weight="700">AWS WAF on an Application Load Balancer</text>
+  <text x="272" y="192" fill="#5C6470" font-size="9">HTTPS only, one ACM certificate for the three host names</text>
+  <text x="272" y="206" fill="#5C6470" font-size="9">Listener 443 with host rules: web, api, media; 80 redirects</text>
+  <text x="272" y="220" fill="#5C6470" font-size="9">Allowlist of up to five addresses, WAF rate limit</text>
+
+  <line x1="378" y1="236" x2="378" y2="256" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- Hume services (Hume) -->
+  <rect x="258" y="260" width="240" height="74" rx="8" fill="#1E8C7E" stroke="#156459"/>
+  <text x="272" y="282" fill="#FFFFFF" font-size="11" font-weight="700">Hume services</text>
+  <text x="272" y="298" fill="#CFEDE8" font-size="9">ECS on EC2, one instance</text>
+  <text x="272" y="311" fill="#CFEDE8" font-size="9">from the pre-baked Hume AMI</text>
+  <text x="272" y="324" fill="#CFEDE8" font-size="9">Images on disk, no registry login</text>
+
+  <line x1="320" y1="334" x2="320" y2="354" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="326" y="348" fill="#5C6470" font-size="8">5432</text>
+
+  <!-- RDS (AWS) -->
+  <rect x="258" y="358" width="156" height="58" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <text x="272" y="379" fill="#16233A" font-size="11" font-weight="700">RDS PostgreSQL</text>
+  <text x="272" y="394" fill="#5C6470" font-size="9">Four Hume databases</text>
+  <text x="272" y="407" fill="#5C6470" font-size="9">Single AZ, not public</text>
+
+  <!-- Spine demo, optional -->
+  <rect x="422" y="358" width="158" height="58" rx="8" fill="#FFFFFF" stroke="#DAD7CE" stroke-dasharray="4 3"/>
+  <text x="436" y="379" fill="#16233A" font-size="11" font-weight="700">Spine demo</text>
+  <text x="436" y="394" fill="#5C6470" font-size="9">Optional, one-time task</text>
+  <text x="436" y="407" fill="#5C6470" font-size="9">Not loaded by default</text>
+
+  <!-- EFS (AWS) -->
+  <line x1="418" y1="334" x2="418" y2="420" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="424" y="348" fill="#5C6470" font-size="8">2049, TLS</text>
+  <rect x="258" y="424" width="322" height="48" rx="6" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <g transform="translate(268 434) scale(0.7)">
+    <rect width="40" height="40" fill="#7AA116"/>
+    <path transform="translate(6 6)" fill="#FFFFFF" d="M27,23 L28,23 L28,27.5 C28,27.776 27.776,28 27.5,28 L23,28 L23,27 L26.293,27 L22.646,23.354 L23.354,22.646 L27,26.293 L27,23 Z M5.354,23.354 L1.707,27 L5,27 L5,28 L0.5,28 C0.224,28 0,27.776 0,27.5 L0,23 L1,23 L1,26.293 L4.646,22.646 L5.354,23.354 Z M28,0.5 L28,5 L27,5 L27,1.707 L23.354,5.354 L22.646,4.646 L26.293,1 L23,1 L23,0 L27.5,0 C27.776,0 28,0.224 28,0.5 L28,0.5 Z M1,5 L0,5 L0,0.5 C0,0.224 0.224,0 0.5,0 L5,0 L5,1 L1.707,1 L5.354,4.646 L4.646,5.354 L1,1.707 L1,5 Z M6.474,10.31 C6.474,10.539 6.492,10.768 6.518,10.988 C6.548,11.238 6.387,11.471 6.142,11.532 C5.077,11.796 3.292,12.62 3.292,15.162 L3.299,15.397 C3.381,16.902 4.373,18.178 5.825,18.68 L5.499,19.625 C3.66,18.99 2.405,17.365 2.302,15.486 C2.296,15.349 2.292,15.256 2.292,15.162 C2.292,12.989 3.477,11.341 5.485,10.681 C5.479,10.558 5.474,10.434 5.474,10.31 C5.474,7.871 7.124,5.34 9.312,4.423 C11.867,3.351 14.579,3.886 16.561,5.85 C17.158,6.443 17.651,7.159 18.031,7.983 C19.631,6.723 22.532,7.288 22.933,10.561 C25.418,11.2 26.781,12.833 26.781,15.191 C26.781,17.792 25.368,18.895 24.184,19.362 L23.816,18.431 C25.139,17.911 25.781,16.851 25.781,15.191 C25.781,13.188 24.632,11.931 22.364,11.455 C22.144,11.409 21.98,11.22 21.968,10.995 C21.86,9.168 20.82,8.351 19.836,8.351 C19.225,8.351 18.647,8.651 18.254,9.175 C18.145,9.321 17.967,9.396 17.779,9.369 C17.598,9.341 17.445,9.216 17.384,9.042 C17.034,8.064 16.506,7.205 15.856,6.559 C15.047,5.758 12.828,4.033 9.698,5.346 C7.89,6.103 6.474,8.284 6.474,10.31 L6.474,10.31 Z M20,23 L8,23 L8,15.5 C8,15.289 8.04,15.131 8.109,15.067 C8.188,14.992 8.366,14.993 8.5,15 L9.897,15 C10.168,15 10.39,14.772 10.397,14.502 C10.4,14.403 10.467,14.155 10.53,13.999 L12.387,13.991 C12.433,14.147 12.475,14.384 12.475,14.5 C12.475,14.776 12.698,15 12.975,15 L19.675,14.999 C19.793,14.99 19.832,15.023 19.845,15.035 C19.92,15.105 20,15.326 20,15.733 L20,23 Z M22.307,16.5 L21,20.419 L21,16.5 L22.307,16.5 Z M23.475,16.158 C23.525,16.006 23.5,15.838 23.405,15.708 C23.312,15.577 23.161,15.5 23,15.5 L20.984,15.5 C20.949,14.967 20.801,14.56 20.527,14.304 C20.36,14.149 20.072,13.969 19.641,14 L13.414,14 C13.329,13.599 13.128,13.089 12.646,13 L10.312,13 C9.816,13 9.585,13.564 9.479,14 L8.534,14.001 C8.079,13.969 7.698,14.081 7.427,14.336 C7.144,14.6 7,14.992 7,15.5 L7,23.5 C7,23.776 7.224,24 7.5,24 L20.5,24 C20.721,24 20.902,23.854 20.969,23.656 L20.975,23.658 L23.475,16.158 Z"/>
+  </g>
+  <text x="306" y="439" fill="#16233A" font-size="10" font-weight="700">Amazon EFS, one file system</text>
+  <text x="306" y="453" fill="#5C6470" font-size="8.5">Media files, Orchestra data and the API audit log</text>
+  <text x="306" y="464" fill="#5C6470" font-size="8.5">Encrypted with the stack KMS key, backed up daily</text>
+
+  <!-- Bolt connection to Neo4j EE -->
+  <text x="546" y="290" fill="#2E6DB4" font-size="8" font-weight="700" text-anchor="middle">neo4j+s, 7687, TLS</text>
+  <text x="546" y="309" fill="#5C6470" font-size="8" text-anchor="middle">Truststore from</text>
+  <text x="546" y="319" fill="#5C6470" font-size="8" text-anchor="middle">the cluster CA</text>
+
+  <!-- ============ NEO4J EE STACK ============ -->
+  <rect x="608" y="122" width="282" height="360" rx="12" fill="#F4F3EF" stroke="#8A8A8A" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="622" y="140" fill="#16233A" font-size="11" font-weight="700" letter-spacing="0.3">EXISTING NEO4J EE STACK</text>
+  <text x="622" y="152" fill="#5C6470" font-size="8" font-weight="700" letter-spacing="0.4">PREREQUISITE, NOT CREATED BY THIS TEMPLATE</text>
+  <text x="622" y="164" fill="#5C6470" font-size="8.5">Deployed first from its own Marketplace listing, 3 servers</text>
+
+  <!-- VPC endpoints (AWS) -->
+  <rect x="622" y="172" width="254" height="78" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <text x="636" y="192" fill="#16233A" font-size="11" font-weight="700">VPC endpoints, NAT gateways</text>
+  <text x="636" y="208" fill="#5C6470" font-size="9">Endpoints: SSM, Secrets Manager. NAT: ECS, Logs</text>
+  <text x="636" y="221" fill="#5C6470" font-size="9">Hume reaches AWS APIs through them</text>
+  <rect x="636" y="229" width="226" height="16" rx="4" fill="#FFFFFF" stroke="#1E8C7E" stroke-width="1.5"/>
+  <text x="749" y="240" fill="#156459" font-size="8" font-weight="700" text-anchor="middle">Added: inbound HTTPS 443 from the Hume tasks</text>
+
+  <!-- Internal NLB (Neo4j) -->
+  <rect x="622" y="258" width="254" height="80" rx="8" fill="#2E6DB4" stroke="#1F4E86"/>
+  <text x="636" y="279" fill="#FFFFFF" font-size="11" font-weight="700">Internal NLB, TLS</text>
+  <text x="636" y="295" fill="#DEEAF6" font-size="9">Bolt 7687, self-signed certificate</text>
+  <text x="636" y="308" fill="#DEEAF6" font-size="9">Private DNS name in Route 53</text>
+  <rect x="636" y="316" width="226" height="16" rx="4" fill="#FFFFFF" stroke="#1E8C7E" stroke-width="1.5"/>
+  <text x="749" y="327" fill="#156459" font-size="8" font-weight="700" text-anchor="middle">Added: inbound Bolt 7687 from the Hume tasks</text>
+
+  <line x1="749" y1="338" x2="749" y2="354" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- Cluster (Neo4j) -->
+  <rect x="622" y="358" width="254" height="58" rx="8" fill="#2E6DB4" stroke="#1F4E86"/>
+  <text x="636" y="379" fill="#FFFFFF" font-size="11" font-weight="700">3 node cluster, one per zone</text>
+  <text x="636" y="394" fill="#DEEAF6" font-size="9">Neo4j EE in private subnets</text>
+  <text x="636" y="407" fill="#DEEAF6" font-size="9">One EBS data volume per node</text>
+
+  <!-- SSM bastion (AWS) -->
+  <rect x="622" y="424" width="254" height="48" rx="6" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <text x="636" y="439" fill="#16233A" font-size="10" font-weight="700">SSM bastion</text>
+  <text x="636" y="453" fill="#5C6470" font-size="8.5">Admin access through Session Manager</text>
+  <text x="636" y="464" fill="#5C6470" font-size="8.5">No inbound ports</text>
+
+  <!-- ============ AWS SERVICES OUTSIDE THE VPC ============ -->
+  <rect x="56" y="528" width="848" height="112" rx="12" fill="#FAFAF8" stroke="#DAD7CE"/>
+  <text x="70" y="548" fill="#5C6470" font-size="8.5" font-weight="700" letter-spacing="0.4">AWS SERVICES OUTSIDE THE VPC, REACHED ON PORT 443</text>
+
+  <rect x="70" y="558" width="260" height="70" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <text x="84" y="578" fill="#16233A" font-size="11" font-weight="700">Secrets Manager</text>
+  <text x="84" y="594" fill="#5C6470" font-size="9">Generated passwords and keys, plus your</text>
+  <text x="84" y="607" fill="#5C6470" font-size="9">licence and truststore secrets</text>
+  <text x="84" y="620" fill="#5C6470" font-size="9">Reached through the Neo4j EE VPC endpoint</text>
+
+  <rect x="350" y="558" width="260" height="70" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <text x="364" y="578" fill="#16233A" font-size="11" font-weight="700">ECS and CloudWatch Logs</text>
+  <text x="364" y="594" fill="#5C6470" font-size="9">ECS control plane, one log group for each task</text>
+  <text x="364" y="607" fill="#5C6470" font-size="9">Reached through the Neo4j EE NAT gateways</text>
+
+  <rect x="630" y="558" width="260" height="70" rx="8" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <text x="644" y="578" fill="#16233A" font-size="11" font-weight="700">SSM Parameter Store</text>
+  <text x="644" y="594" fill="#5C6470" font-size="9">Connection values of the Neo4j EE stack,</text>
+  <text x="644" y="607" fill="#5C6470" font-size="9">read at stack create and update</text>
+  <text x="644" y="620" fill="#5C6470" font-size="9">Reached by a lookup Lambda outside the VPC</text>
+
+  <!-- Arrows that cross panel edges, drawn last so their heads stay on top -->
+  <line x1="220" y1="195" x2="254" y2="195" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <path d="M749,482 L749,504 L420,504 L420,485" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="584" y="499" fill="#5C6470" font-size="8" text-anchor="middle">Reads the connection from SSM Parameter Store, /neo4j-ee/&lt;EeStackName&gt;/</text>
+  <line x1="498" y1="297" x2="618" y2="297" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="580" y1="387" x2="618" y2="387" stroke="#8A8A8A" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+
+  <!-- ============ LEGEND ============ -->
+  <rect x="56" y="650" width="9" height="9" rx="2" fill="#1E8C7E"/>
+  <text x="70" y="658" fill="#16233A" font-size="9">Hume</text>
+  <rect x="112" y="650" width="9" height="9" rx="2" fill="#2E6DB4"/>
+  <text x="126" y="658" fill="#16233A" font-size="9">Neo4j</text>
+  <rect x="168" y="650" width="9" height="9" rx="2" fill="#F1F1EE" stroke="#DAD7CE"/>
+  <text x="182" y="658" fill="#16233A" font-size="9">AWS service or network</text>
+  <rect x="298" y="650" width="16" height="9" rx="2" fill="none" stroke="#8A8A8A" stroke-dasharray="3 2"/>
+  <text x="319" y="658" fill="#16233A" font-size="9">VPC</text>
+  <rect x="352" y="650" width="16" height="9" rx="2" fill="#FFFFFF" stroke="#DAD7CE" stroke-dasharray="3 2"/>
+  <text x="373" y="658" fill="#16233A" font-size="9">Optional</text>
+  <rect x="416" y="650" width="16" height="9" rx="2" fill="none" stroke="#1E8C7E" stroke-width="1.5"/>
+  <text x="437" y="658" fill="#16233A" font-size="9">Created by this template</text>
+  <rect x="560" y="650" width="16" height="9" rx="2" fill="#F4F3EF" stroke="#8A8A8A" stroke-dasharray="3 2"/>
+  <text x="581" y="658" fill="#16233A" font-size="9">Existing prerequisite</text>
+</svg>

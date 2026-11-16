@@ -1,0 +1,65 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Working plan and status log, kept local
+/hume-ecs.md
+
+# Build output and deploy records
+ami/ami-id.txt
+stack/.deploy/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# uv
+.python-version
+
+# IntelliJ / JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Make
+*.o
+*.d
+
+# Local scratch and logs
+*.log
+*.swp
+*~
+
+# Local plan for the Neo4j EE private network work
+/private-hume-neo4jee.md
