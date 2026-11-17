@@ -587,13 +587,22 @@ class RdsCertificateTest(Phase1Case):
         self.assertEqual(environment["PGSSLROOTCERT"], RDS_CA_PATH)
 
 
-class EventstoreAnalyticsTest(Phase1Case):
-    def test_the_event_store_turns_off_liquibase_analytics(self) -> None:
-        container = self.resources["EventstoreTaskDefinition"]["Properties"][
-            "ContainerDefinitions"
-        ][0]
-        environment = {e["Name"]: e["Value"] for e in container["Environment"]}
-        self.assertEqual(environment["LIQUIBASE_ANALYTICS_ENABLED"], "false")
+class LiquibaseAnalyticsTest(Phase1Case):
+    def test_the_services_turn_off_liquibase_analytics(self) -> None:
+        for task in (
+            "EventstoreTaskDefinition",
+            "OrchestraTaskDefinition",
+            "MediaTaskDefinition",
+        ):
+            with self.subTest(task):
+                properties = self.resources[task]["Properties"]
+                container = properties["ContainerDefinitions"][0]
+                environment = {
+                    e["Name"]: e["Value"]
+                    for e in container["Environment"]
+                    if "Name" in e
+                }
+                self.assertEqual(environment["LIQUIBASE_ANALYTICS_ENABLED"], "false")
 
 
 class ServiceKeyTest(Phase1Case):

@@ -3498,6 +3498,10 @@ Resources:
               Value: 'true'
             - Name: orchestra.scripting.python.security.config
               Value: /security/security.json
+            # Stops the anonymous Liquibase analytics calls at startup, as on
+            # the event store.
+            - Name: LIQUIBASE_ANALYTICS_ENABLED
+              Value: 'false'
           Secrets:
             - Name: spring.datasource.password
               ValueFrom: !Sub '${OrchestraDbSecret}:password::'
@@ -3870,6 +3874,10 @@ Resources:
               Value: /hume-media/ready
             - Name: hume.media.notifications.event-store.enabled
               Value: 'true'
+            # Stops the anonymous Liquibase analytics calls at startup, as on
+            # the event store.
+            - Name: LIQUIBASE_ANALYTICS_ENABLED
+              Value: 'false'
           Secrets:
             - Name: hume.eventstore.password
               ValueFrom: !Ref EventstorePasswordSecret
