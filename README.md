@@ -81,7 +81,6 @@ Follow [the run book](docs/guides/run-book.md). It covers every step, in this or
 | `stack/` | The CloudFormation template `hume-ecs.template.yaml`, `deploy.py`, `check_prereqs.py`, `allowlist.py`, `neo4j_env.py`, `vpn_ip_ranges.py`, and the record files in `.deploy/`. |
 | `verify/` | `blackbox.py` and `prove.py`, which check and prove a deployed stack, and `cognito.py`, which builds the Cognito test pool. |
 | `demo/spine/` | The Spine demo scripts `seed_nodes.py` and `spine_demo.py`, the Cypher file and the CCR data, with their own README. `hume-config/` holds the Spine knowledge graph config for Hume, copied unchanged from the hume-quickstart repo. |
-| `marketplace/` | `marketplace_assets.py`, which creates the AWS Marketplace ingestion role and publishes the listing assets. |
 | `tests/` | The offline tests, which make no AWS call. `helpers/` holds the shared helpers. `template/`, `stack/`, `verify/`, `demo/` and `docs/` hold the tests of the template, the scripts and the doc links. |
 | `docs/` | The documents, listed in [the docs index](docs/README.md), the customer deploy guide `deploy-guide.md`, and the diagrams in `images/`. |
 | `docs/guides/` | The run book and the guides for checks, operations, troubleshooting, teardown and the Spine demo. |
