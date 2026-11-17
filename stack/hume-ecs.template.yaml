@@ -539,6 +539,15 @@ Rules:
           ExistingDataKeyArn is required when ExistingFileSystemId is set. Use
           the DataKeyArn output of the earlier stack.
 
+Mappings:
+  # AWS Partner Revenue Measurement. Every taggable resource carries this tag,
+  # so AWS can attribute the stack's usage to the Hume Marketplace listing. The
+  # key names the Neo4j partner account and the value is the Hume product code.
+  Prm:
+    Tag:
+      Key: aws-apn-id-385155106615
+      Value: pc:7zd8meh8xo9g62zqwwvprdw7m
+
 Conditions:
   UseOidc: !Equals [!Ref AuthProvider, Oidc]
   UseOidcJwkSetUri: !Not [!Equals [!Ref OidcJwkSetUri, '']]
@@ -573,6 +582,9 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-neo4j-ee-lookup'
       RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   Neo4jEeLookupRole:
     Type: AWS::IAM::Role
@@ -597,6 +609,9 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !GetAtt Neo4jEeLookupLogGroup.Arn
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   Neo4jEeLookupFunction:
     Type: AWS::Lambda::Function
@@ -686,6 +701,9 @@ Resources:
                   return
               print(f"Read {len(data)} values of Neo4j EE stack {stack}")
               cfnresponse.send(event, context, cfnresponse.SUCCESS, data, physical_id)
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   Neo4jEeLookup:
     Type: Custom::Neo4jEeLookup
@@ -712,6 +730,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-alb'
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -725,6 +745,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-instance'
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   DatabaseSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -744,6 +766,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-database'
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   EfsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -763,6 +787,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-efs'
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # The load balancer listens on 443, and on 80 only to redirect to 443. Both
   # ports take the same allowlist, because the redirect must reach the same
@@ -1216,6 +1242,9 @@ Resources:
                   - ecs:ListAttributes
                   - ecs:PutAccountSetting
                 Resource: '*'
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -1237,6 +1266,9 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # The task role of the API and Orchestra. Their AWS vault provider reads the
   # neo4j_app password from Secrets Manager at run time, so a Hume resource
@@ -1269,6 +1301,9 @@ Resources:
                   StringEquals:
                     kms:ViaService: !Sub 'secretsmanager.${AWS::Region}.${AWS::URLSuffix}'
                     kms:EncryptionContext:SecretARN: !GetAtt Neo4jEeLookup.Neo4jAppPasswordSecretArn
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # Cluster, launch template, Auto Scaling group, capacity provider
@@ -1277,6 +1312,9 @@ Resources:
     Type: AWS::ECS::Cluster
     Properties:
       ClusterName: !Ref AWS::StackName
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   InstanceLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
@@ -1423,10 +1461,18 @@ Resources:
             Tags:
               - Key: Name
                 Value: !Sub '${AWS::StackName}-instance'
+              - Key: !FindInMap [Prm, Tag, Key]
+                Value: !FindInMap [Prm, Tag, Value]
           - ResourceType: volume
             Tags:
               - Key: Name
                 Value: !Sub '${AWS::StackName}-instance'
+              - Key: !FindInMap [Prm, Tag, Key]
+                Value: !FindInMap [Prm, Tag, Value]
+          - ResourceType: network-interface
+            Tags:
+              - Key: !FindInMap [Prm, Tag, Key]
+                Value: !FindInMap [Prm, Tag, Value]
 
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
@@ -1445,6 +1491,9 @@ Resources:
         - Key: Name
           Value: !Sub '${AWS::StackName}-instance'
           PropagateAtLaunch: true
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
+          PropagateAtLaunch: true
 
   CapacityProvider:
     Type: AWS::ECS::CapacityProvider
@@ -1454,6 +1503,9 @@ Resources:
         ManagedScaling:
           Status: DISABLED
         ManagedTerminationProtection: DISABLED
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   ClusterCapacityProviderAssociation:
     Type: AWS::ECS::ClusterCapacityProviderAssociations
@@ -1495,6 +1547,9 @@ Resources:
               AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
             Action: 'kms:*'
             Resource: '*'
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   DataKeyAlias:
     Type: AWS::KMS::Alias
@@ -1518,6 +1573,9 @@ Resources:
         GenerateStringKey: password
         PasswordLength: 32
         ExcludePunctuation: true
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   DbMasterSecretAttachment:
     Type: AWS::SecretsManager::SecretTargetAttachment
@@ -1537,6 +1595,9 @@ Resources:
         GenerateStringKey: password
         PasswordLength: 32
         ExcludePunctuation: true
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   OrchestraDbSecret:
     Type: AWS::SecretsManager::Secret
@@ -1549,6 +1610,9 @@ Resources:
         GenerateStringKey: password
         PasswordLength: 32
         ExcludePunctuation: true
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   EventstoreDbSecret:
     Type: AWS::SecretsManager::Secret
@@ -1561,6 +1625,9 @@ Resources:
         GenerateStringKey: password
         PasswordLength: 32
         ExcludePunctuation: true
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   MediaDbSecret:
     Type: AWS::SecretsManager::Secret
@@ -1573,6 +1640,9 @@ Resources:
         GenerateStringKey: password
         PasswordLength: 32
         ExcludePunctuation: true
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   EventstorePasswordSecret:
     Type: AWS::SecretsManager::Secret
@@ -1583,6 +1653,9 @@ Resources:
       GenerateSecretString:
         PasswordLength: 32
         ExcludePunctuation: true
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # Spine demo only. hume-config-cli signs in with this key, and nothing else
   # uses API keys.
@@ -1596,6 +1669,9 @@ Resources:
       GenerateSecretString:
         PasswordLength: 32
         ExcludePunctuation: true
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   JwtKeySecret:
     Type: AWS::SecretsManager::Secret
@@ -1607,6 +1683,9 @@ Resources:
       GenerateSecretString:
         PasswordLength: 128
         ExcludePunctuation: true
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # Service keys. The API and media share four keys, and media also holds a
@@ -1635,6 +1714,9 @@ Resources:
       GenerateSecretString:
         PasswordLength: 32
         ExcludePunctuation: true
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   ApiToMediaKeySecret:
     Type: AWS::SecretsManager::Secret
@@ -1647,6 +1729,9 @@ Resources:
         ExcludePunctuation: true
         ExcludeUppercase: true
         ExcludeCharacters: ghijklmnopqrstuvwxyz
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   MediaToApiKeySecret:
     Type: AWS::SecretsManager::Secret
@@ -1659,6 +1744,9 @@ Resources:
         ExcludePunctuation: true
         ExcludeUppercase: true
         ExcludeCharacters: ghijklmnopqrstuvwxyz
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   SymmetricKeySecret:
     Type: AWS::SecretsManager::Secret
@@ -1671,6 +1759,9 @@ Resources:
         ExcludePunctuation: true
         ExcludeUppercase: true
         ExcludeCharacters: ghijklmnopqrstuvwxyz
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   MaintenanceKeySecret:
     Type: AWS::SecretsManager::Secret
@@ -1683,6 +1774,9 @@ Resources:
         ExcludePunctuation: true
         ExcludeUppercase: true
         ExcludeCharacters: ghijklmnopqrstuvwxyz
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # RDS. One instance holds the four Hume databases. Logical replication is a
@@ -1703,6 +1797,9 @@ Resources:
       SubnetIds:
         - !GetAtt Neo4jEeLookup.PrivateSubnet1Id
         - !GetAtt Neo4jEeLookup.PrivateSubnet2Id
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   DatabaseParameterGroup:
     Type: AWS::RDS::DBParameterGroup
@@ -1711,6 +1808,9 @@ Resources:
       Family: postgres17
       Parameters:
         rds.logical_replication: '1'
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   Database:
     Type: AWS::RDS::DBInstance
@@ -1745,6 +1845,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-database'
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # EFS for the data that Orchestra, the API audit log, and media write. The
@@ -1775,6 +1877,8 @@ Resources:
       FileSystemTags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-data'
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   DataMountTarget1:
     Type: AWS::EFS::MountTarget
@@ -1808,6 +1912,8 @@ Resources:
       AccessPointTags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-orchestra'
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   AuditLogsAccessPoint:
     Type: AWS::EFS::AccessPoint
@@ -1825,6 +1931,8 @@ Resources:
       AccessPointTags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-audit-logs'
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   MediaAccessPoint:
     Type: AWS::EFS::AccessPoint
@@ -1842,6 +1950,8 @@ Resources:
       AccessPointTags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-media'
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # Log groups, one per service and one-time task, plus the smoke test.
@@ -1851,36 +1961,54 @@ Resources:
     Properties:
       LogGroupName: !Sub '/hume/${AWS::StackName}/eventstore'
       RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   OrchestraLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/hume/${AWS::StackName}/orchestra'
       RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   ApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/hume/${AWS::StackName}/api'
       RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   MediaLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/hume/${AWS::StackName}/media'
       RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   WebLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/hume/${AWS::StackName}/web'
       RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   DbInitLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/hume/${AWS::StackName}/db-init'
       RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   ConfigCliLogGroup:
     Type: AWS::Logs::LogGroup
@@ -1888,12 +2016,18 @@ Resources:
     Properties:
       LogGroupName: !Sub '/hume/${AWS::StackName}/config-cli'
       RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   SmokeTestLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/hume/${AWS::StackName}/smoke-test'
       RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # Smoke test task definition. The deploy helper runs it once to prove an
@@ -1925,6 +2059,9 @@ Resources:
               awslogs-group: !Ref SmokeTestLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: smoke
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # Instance boot. The role reads the truststore secret and signals the
@@ -1980,6 +2117,9 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-run-task'
       RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   RunTaskRole:
     Type: AWS::IAM::Role
@@ -2024,6 +2164,9 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !GetAtt RunTaskLogGroup.Arn
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   RunTaskFunction:
     Type: AWS::Lambda::Function
@@ -2160,6 +2303,9 @@ Resources:
               cfnresponse.send(
                   event, context, cfnresponse.SUCCESS, {"TaskArn": task_arn}, physical_id
               )
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # Master password reset, for a restored database only. A restore keeps the
@@ -2174,6 +2320,9 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-db-master-reset'
       RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   DbMasterResetRole:
     Type: AWS::IAM::Role
@@ -2207,6 +2356,9 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !GetAtt DbMasterResetLogGroup.Arn
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   DbMasterResetFunction:
     Type: AWS::Lambda::Function
@@ -2297,6 +2449,9 @@ Resources:
               cfnresponse.send(
                   event, context, cfnresponse.SUCCESS, {"Done": instance}, physical_id
               )
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   DbMasterReset:
     Type: Custom::DbMasterPasswordReset
@@ -2409,6 +2564,9 @@ Resources:
               awslogs-group: !Ref DbInitLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: db-init
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   DbInitRun:
     Type: Custom::EcsRunTask
@@ -2470,6 +2628,9 @@ Resources:
     Properties:
       Name: hume.local
       Vpc: !GetAtt Neo4jEeLookup.VpcId
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   EventstoreDiscoveryService:
     Type: AWS::ServiceDiscovery::Service
@@ -2483,6 +2644,9 @@ Resources:
             TTL: 10
       HealthCheckCustomConfig:
         FailureThreshold: 1
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   OrchestraDiscoveryService:
     Type: AWS::ServiceDiscovery::Service
@@ -2496,6 +2660,9 @@ Resources:
             TTL: 10
       HealthCheckCustomConfig:
         FailureThreshold: 1
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   ApiDiscoveryService:
     Type: AWS::ServiceDiscovery::Service
@@ -2509,6 +2676,9 @@ Resources:
             TTL: 10
       HealthCheckCustomConfig:
         FailureThreshold: 1
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   MediaDiscoveryService:
     Type: AWS::ServiceDiscovery::Service
@@ -2522,6 +2692,9 @@ Resources:
             TTL: 10
       HealthCheckCustomConfig:
         FailureThreshold: 1
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # The native administrator password. The allowlist is the outer gate and this
@@ -2538,6 +2711,9 @@ Resources:
       GenerateSecretString:
         PasswordLength: 24
         ExcludePunctuation: true
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # Certificate and DNS names. One public ACM certificate for the three host
@@ -2567,6 +2743,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-alb'
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # One alias record per host. Nothing else in the zone is created or changed.
   # Route 53 refuses to create a record that already exists, so a clash with
@@ -2642,6 +2820,9 @@ Resources:
             ExpirationInDays: !Ref AccessLogExpirationDays
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   AccessLogBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -2693,6 +2874,9 @@ Resources:
         - !GetAtt Neo4jEeLookup.PublicSubnet1Id
         - !GetAtt Neo4jEeLookup.PublicSubnet2Id
         - !GetAtt Neo4jEeLookup.PublicSubnet3Id
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   WebTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -2712,6 +2896,9 @@ Resources:
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: '30'
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   ApiTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -2734,6 +2921,9 @@ Resources:
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: '30'
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   MediaTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -2756,6 +2946,9 @@ Resources:
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: '30'
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   HttpsListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -2772,6 +2965,9 @@ Resources:
             StatusCode: '403'
             ContentType: text/plain
             MessageBody: Forbidden
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # The one action keeps the host, path and query, so each host redirects to
   # itself.
@@ -2787,6 +2983,9 @@ Resources:
             Protocol: HTTPS
             Port: '443'
             StatusCode: HTTP_301
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # The metrics endpoint answers without a sign in and nothing here scrapes it.
   # The api now serves it on the management port 7001, which the load balancer
@@ -2812,6 +3011,9 @@ Resources:
             StatusCode: '403'
             ContentType: text/plain
             MessageBody: Forbidden
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   ApiForwardRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
@@ -2826,6 +3028,9 @@ Resources:
       Actions:
         - Type: forward
           TargetGroupArn: !Ref ApiTargetGroup
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   MediaForwardRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
@@ -2845,6 +3050,9 @@ Resources:
       Actions:
         - Type: forward
           TargetGroupArn: !Ref MediaTargetGroup
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   WebForwardRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
@@ -2859,6 +3067,9 @@ Resources:
       Actions:
         - Type: forward
           TargetGroupArn: !Ref WebTargetGroup
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # Regional WAF. The rate rule blocks an address that sends more requests than
@@ -2912,6 +3123,9 @@ Resources:
             CloudWatchMetricsEnabled: true
             MetricName: aws-common-rules
             SampledRequestsEnabled: true
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   WebAclAssociation:
     Type: AWS::WAFv2::WebACLAssociation
@@ -2929,6 +3143,9 @@ Resources:
     Properties:
       LogGroupName: !Sub 'aws-waf-logs-${AWS::StackName}'
       RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   WebAclLogging:
     Type: AWS::WAFv2::LoggingConfiguration
@@ -2952,6 +3169,9 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Sub '${AWS::StackName}-alarms'
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   AlarmEmailSubscription:
     Type: AWS::SNS::Subscription
@@ -2980,6 +3200,9 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlarmTopic
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   ApiUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -3000,6 +3223,9 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlarmTopic
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   MediaUnhealthyAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -3020,6 +3246,9 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlarmTopic
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   AlbTarget5xxAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -3038,6 +3267,9 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlarmTopic
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   AlbElb5xxAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -3056,6 +3288,9 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlarmTopic
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   DatabaseCpuAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -3074,6 +3309,9 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlarmTopic
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   DatabaseFreeStorageAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -3092,6 +3330,9 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlarmTopic
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   InstanceStatusAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -3110,6 +3351,9 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlarmTopic
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # Task definitions. All use awsvpc, the EC2 launch type, and image version
@@ -3187,6 +3431,9 @@ Resources:
               awslogs-group: !Ref EventstoreLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: eventstore
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   OrchestraTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -3293,6 +3540,9 @@ Resources:
               awslogs-group: !Ref OrchestraLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: orchestra
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   ApiTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -3514,6 +3764,9 @@ Resources:
               awslogs-group: !Ref ApiLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: api
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   MediaTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -3669,6 +3922,9 @@ Resources:
               awslogs-group: !Ref MediaLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: media
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # The browser calls the API and media through their own host names, so the
   # web task gets those two names. They must be https, because a page served
@@ -3736,6 +3992,9 @@ Resources:
               awslogs-group: !Ref WebLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: web
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # The one-time import task. Two containers share a task scoped volume. The
@@ -3959,6 +4218,9 @@ Resources:
               awslogs-group: !Ref ConfigCliLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: config-cli
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # ---------------------------------------------------------------------------
   # Services, created in dependency order: eventstore, orchestra, api, media,
@@ -3991,6 +4253,8 @@ Resources:
     Properties:
       Cluster: !Ref Cluster
       ServiceName: eventstore
+      PropagateTags: SERVICE
+      EnableECSManagedTags: true
       TaskDefinition: !Ref EventstoreTaskDefinition
       DesiredCount: !Ref EventstoreCopies
       CapacityProviderStrategy:
@@ -4014,6 +4278,9 @@ Resources:
             - !Ref InstanceSecurityGroup
       ServiceRegistries:
         - RegistryArn: !GetAtt EventstoreDiscoveryService.Arn
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   OrchestraService:
     Type: AWS::ECS::Service
@@ -4033,6 +4300,8 @@ Resources:
     Properties:
       Cluster: !Ref Cluster
       ServiceName: orchestra
+      PropagateTags: SERVICE
+      EnableECSManagedTags: true
       TaskDefinition: !Ref OrchestraTaskDefinition
       # Fixed at one copy on purpose. A second Orchestra needs extra licensing,
       # so no parameter controls this count.
@@ -4058,6 +4327,9 @@ Resources:
             - !Ref InstanceSecurityGroup
       ServiceRegistries:
         - RegistryArn: !GetAtt OrchestraDiscoveryService.Arn
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   ApiService:
     Type: AWS::ECS::Service
@@ -4078,6 +4350,8 @@ Resources:
     Properties:
       Cluster: !Ref Cluster
       ServiceName: api
+      PropagateTags: SERVICE
+      EnableECSManagedTags: true
       TaskDefinition: !Ref ApiTaskDefinition
       DesiredCount: !Ref ApiCopies
       CapacityProviderStrategy:
@@ -4106,6 +4380,9 @@ Resources:
           TargetGroupArn: !Ref ApiTargetGroup
       ServiceRegistries:
         - RegistryArn: !GetAtt ApiDiscoveryService.Arn
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   MediaService:
     Type: AWS::ECS::Service
@@ -4126,6 +4403,8 @@ Resources:
     Properties:
       Cluster: !Ref Cluster
       ServiceName: media
+      PropagateTags: SERVICE
+      EnableECSManagedTags: true
       TaskDefinition: !Ref MediaTaskDefinition
       DesiredCount: !Ref MediaCopies
       CapacityProviderStrategy:
@@ -4154,6 +4433,9 @@ Resources:
           TargetGroupArn: !Ref MediaTargetGroup
       ServiceRegistries:
         - RegistryArn: !GetAtt MediaDiscoveryService.Arn
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   WebService:
     Type: AWS::ECS::Service
@@ -4171,6 +4453,8 @@ Resources:
     Properties:
       Cluster: !Ref Cluster
       ServiceName: web
+      PropagateTags: SERVICE
+      EnableECSManagedTags: true
       TaskDefinition: !Ref WebTaskDefinition
       DesiredCount: !Ref WebCopies
       CapacityProviderStrategy:
@@ -4197,6 +4481,9 @@ Resources:
         - ContainerName: web
           ContainerPort: 8081
           TargetGroupArn: !Ref WebTargetGroup
+      Tags:
+        - Key: !FindInMap [Prm, Tag, Key]
+          Value: !FindInMap [Prm, Tag, Value]
 
   # Runs hume-config-cli once the API, Orchestra and media services are steady.
   # CloudFormation waits for an ECS service to reach steady state, so the
