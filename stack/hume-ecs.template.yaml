@@ -10,8 +10,8 @@ Description: >-
   APIs in the stack's own Region: AWS CloudFormation (DescribeStackResource,
   SignalResource), Amazon ECS (PutAccountSetting) and AWS Secrets Manager
   (GetSecretValue). The stack's own calls send no customer data outside the
-  buyer's account. The Hume API validates the licence key with GraphAware over
-  HTTPS. The ExternalConnectivityDisclosure metadata lists every connection.
+  buyer's account. The ExternalConnectivityDisclosure metadata lists every
+  connection.
 
 Metadata:
   ExternalConnectivityDisclosure:
@@ -19,8 +19,7 @@ Metadata:
       Every connection this product makes. The product downloads nothing on
       deployment. All AWS API calls use the stack's own IAM roles and stay in
       the buyer's account and Region. The stack's own calls send no customer
-      data outside the buyer's account. RuntimeConnections lists the Hume
-      licence check with GraphAware over HTTPS.
+      data outside the buyer's account.
     DeployTimeExternalDependencies: []
     AWSServiceEndpoints:
       - Endpoint: http://169.254.169.254
@@ -93,9 +92,6 @@ Metadata:
       - Endpoint: Amazon RDS database and Amazon EFS file system in the same VPC
         Caller: Hume services
         Purpose: Stores Hume settings and files.
-      - Endpoint: GraphAware licence service, over HTTPS
-        Caller: Hume API
-        Purpose: Validates the Hume licence key.
       - Endpoint: The OpenID Connect provider set in OidcIssuerUri, over HTTPS
         Caller: Hume API and media services
         Purpose: Fetches the provider's signing keys.

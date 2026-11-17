@@ -98,8 +98,7 @@ Some customer setups need outbound access beyond the VPC.
 1. **Identity provider:** `api` and `media` call the identity provider server to server. It fetches signing keys and exchanges login codes for tokens. A cloud identity provider such as Okta or Microsoft Entra ID sits on the internet.
 2. **Orchestra workflows:** A workflow may call a REST API, message broker, or data source outside the VPC.
 3. **Email:** The optional alerting module sends notifications through an SMTP server. That server may sit outside the VPC. The first listing ships the minimum Hume capability, without alerting.
-4. **License check:** The Hume license may call home to GraphAware. GraphAware must confirm whether it does.
-5. **Certificate revocation:** Hume may check certificate revocation lists or OCSP responders for the identity provider's certificate. The CA may publish these on the internet.
+4. **Certificate revocation:** Hume may check certificate revocation lists or OCSP responders for the identity provider's certificate. The CA may publish these on the internet.
 
 ## Traffic Walkthrough
 
