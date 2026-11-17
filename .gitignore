@@ -63,3 +63,6 @@ $RECYCLE.BIN/
 
 # Local plan for the Neo4j EE private network work
 /private-hume-neo4jee.md
+
+# Local plan for PRM tracking in the Hume and Neo4j EE repos
+/prm-plan.md
