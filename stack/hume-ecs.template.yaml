@@ -84,6 +84,11 @@ Metadata:
         Purpose: >-
           Register the instance, run the tasks, read the task secrets, send
           the container logs and provide Session Manager.
+        Route: >-
+          Amazon ECS through the VPC's NAT gateways. The other services through
+          the VPC's interface endpoints, created or reused by the Neo4j EE
+          stack. Secrets Manager calls AWS KMS itself, so the instance makes no
+          KMS call.
         DataSent: Container logs, to CloudWatch Logs in the buyer's account
     RuntimeConnections:
       - Endpoint: Neo4j EE cluster in the same VPC, neo4j+s on port 7687

@@ -48,7 +48,7 @@ The user data appends `ECS_CLUSTER=<cluster>` at launch, so the AMI holds no clu
 |---|---|---|---|---|
 | `web` | 8081 | 1 | None | None |
 | `api` | 8080, 9080, 7001 | 1 | HTTP liveness on 7001 | `/conf` on the instance, audit logs on EFS |
-| `orchestra` | 8100, 8666, 7001 | 1, A second copy needs another licence. | HTTP liveness on 7001 | `/conf` and `/security` on the instance, `/data` on EFS |
+| `orchestra` | 8100, 8666, 7001 | 1. Orchestra supports clustering. Each additional member needs its own licence, so the stack runs one. | HTTP liveness on 7001 | `/conf` and `/security` on the instance, `/data` on EFS |
 | `eventstore` | 8080, 9090, 7001 | 1 | HTTP liveness on 7001 | Postgres only |
 | `media` | 8008, 7001 | 1 | HTTP liveness on 7001 | Uploaded files on EFS |
 | `db-init` | none | Runs once per deploy | None | None |
